@@ -1,5 +1,7 @@
 # ComfyUI Gemini Nodes
 
+[中文版](README_CN.md)
+
 A collection of custom nodes for integrating Google Gemini API with ComfyUI, providing powerful AI capabilities for text generation, image generation, and video analysis.
 
 ## Features
@@ -38,7 +40,7 @@ A collection of custom nodes for integrating Google Gemini API with ComfyUI, pro
 1. Clone this repository into your ComfyUI custom nodes directory:
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/yourusername/comfyui-gemini-nodes.git
+git clone https://github.com/jqy-yo/comfyui-gemini-nodes.git
 ```
 
 2. Install required dependencies:
@@ -131,7 +133,19 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Credits
 
-Original nodes created as part of the Fill-Nodes collection, now separated for focused Gemini API integration.
+This project is based on code from [ComfyUI_Fill-Nodes](https://github.com/filliptm/ComfyUI_Fill-Nodes) by filliptm. Special thanks to filliptm for the original implementation and inspiration.
+
+The nodes have been refactored and enhanced to focus specifically on Gemini API integration with additional features:
+- Flexible model selection via text input
+- API version selection support
+- Improved error handling and compatibility
+- Support for latest Gemini models
+
+## Acknowledgments
+
+- Original code and concept by [filliptm](https://github.com/filliptm)
+- Based on [ComfyUI_Fill-Nodes](https://github.com/filliptm/ComfyUI_Fill-Nodes)
+- Refactored and maintained by [jqy-yo](https://github.com/jqy-yo)
 
 ## Support
 
