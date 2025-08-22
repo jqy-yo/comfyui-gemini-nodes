@@ -1,0 +1,339 @@
+结构化输出
+
+您可以将 Gemini 配置为输出结构化数据，而不是非结构化文本，从而精确提取和标准化信息以供进一步处理。 例如，您可以使用结构化输出从简历中提取信息，并将其标准化以构建结构化数据库。
+
+Gemini 可以生成 JSON 或枚举值作为结构化输出。
+
+生成 JSON
+如需限制模型生成 JSON，请配置 responseSchema。然后，模型会以 JSON 格式的输出回答任何提示。
+
+Python
+JavaScript
+Go
+REST
+
+from google import genai
+from pydantic import BaseModel
+
+class Recipe(BaseModel):
+    recipe_name: str
+    ingredients: list[str]
+
+client = genai.Client()
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents="List a few popular cookie recipes, and include the amounts of ingredients.",
+    config={
+        "response_mime_type": "application/json",
+        "response_schema": list[Recipe],
+    },
+)
+# Use the response as a JSON string.
+print(response.text)
+
+# Use instantiated objects.
+my_recipes: list[Recipe] = response.parsed
+注意： Pydantic 验证器尚不受支持。如果发生 pydantic.ValidationError，系统会抑制该错误，并且 .parsed 可能为空/null。
+输出可能如下所示：
+
+
+[
+  {
+    "recipeName": "Chocolate Chip Cookies",
+    "ingredients": [
+      "1 cup (2 sticks) unsalted butter, softened",
+      "3/4 cup granulated sugar",
+      "3/4 cup packed brown sugar",
+      "1 teaspoon vanilla extract",
+      "2 large eggs",
+      "2 1/4 cups all-purpose flour",
+      "1 teaspoon baking soda",
+      "1 teaspoon salt",
+      "2 cups chocolate chips"
+    ]
+  },
+  ...
+]
+生成枚举值
+在某些情况下，您可能希望模型从选项列表中选择一个选项。如需实现此行为，您可以在架构中传递 枚举。您可以在 responseSchema 中使用枚举选项，就像使用 string 一样，因为枚举是字符串数组。与 JSON 架构类似，枚举可让您限制模型输出，以满足应用的要求。
+
+例如，假设您正在开发一个应用，用于将乐器分为五类："Percussion"、"String"、"Woodwind"、"Brass" 或“"Keyboard"”。您可以创建一个枚举来帮助完成此任务。
+
+在以下示例中，您传递了一个枚举作为 responseSchema，从而限制模型选择最合适的选项。
+
+Python
+JavaScript
+REST
+
+from google import genai
+import enum
+
+class Instrument(enum.Enum):
+  PERCUSSION = "Percussion"
+  STRING = "String"
+  WOODWIND = "Woodwind"
+  BRASS = "Brass"
+  KEYBOARD = "Keyboard"
+
+client = genai.Client()
+response = client.models.generate_content(
+    model='gemini-2.5-flash',
+    contents='What type of instrument is an oboe?',
+    config={
+        'response_mime_type': 'text/x.enum',
+        'response_schema': Instrument,
+    },
+)
+
+print(response.text)
+# Woodwind
+Python 库将转换 API 的类型声明。不过，该 API 接受 OpenAPI 3.0 架构 (Schema) 的子集。
+
+还有两种其他方式可以指定枚举。您可以使用 Literal： ```
+
+Python
+
+Literal["Percussion", "String", "Woodwind", "Brass", "Keyboard"]
+您还可以将架构作为 JSON 传递：
+
+Python
+
+from google import genai
+
+client = genai.Client()
+response = client.models.generate_content(
+    model='gemini-2.5-flash',
+    contents='What type of instrument is an oboe?',
+    config={
+        'response_mime_type': 'text/x.enum',
+        'response_schema': {
+            "type": "STRING",
+            "enum": ["Percussion", "String", "Woodwind", "Brass", "Keyboard"],
+        },
+    },
+)
+
+print(response.text)
+# Woodwind
+除了基本的多项选择题之外，您还可以在 JSON 架构中的任何位置使用枚举。例如，您可以让模型提供食谱标题列表，并使用 Grade 枚举为每个标题指定热度等级：
+
+Python
+
+from google import genai
+
+import enum
+from pydantic import BaseModel
+
+class Grade(enum.Enum):
+    A_PLUS = "a+"
+    A = "a"
+    B = "b"
+    C = "c"
+    D = "d"
+    F = "f"
+
+class Recipe(BaseModel):
+  recipe_name: str
+  rating: Grade
+
+client = genai.Client()
+response = client.models.generate_content(
+    model='gemini-2.5-flash',
+    contents='List 10 home-baked cookie recipes and give them grades based on tastiness.',
+    config={
+        'response_mime_type': 'application/json',
+        'response_schema': list[Recipe],
+    },
+)
+
+print(response.text)
+响应可能如下所示：
+
+
+[
+  {
+    "recipe_name": "Chocolate Chip Cookies",
+    "rating": "a+"
+  },
+  {
+    "recipe_name": "Peanut Butter Cookies",
+    "rating": "a"
+  },
+  {
+    "recipe_name": "Oatmeal Raisin Cookies",
+    "rating": "b"
+  },
+  ...
+]
+JSON 架构简介
+使用 responseSchema 参数将模型配置为 JSON 输出时，需要依赖 Schema 对象来定义其结构。此对象表示 OpenAPI 3.0 架构对象的选定子集，并添加了 propertyOrdering 字段。
+
+提示： 在 Python 中，当您使用 Pydantic 模型时，无需直接处理 Schema 对象，因为该对象会自动转换为相应的 JSON 架构。如需了解详情，请参阅 Python 中的 JSON 架构。
+以下是所有 Schema 字段的伪 JSON 表示法：
+
+
+{
+  "type": enum (Type),
+  "format": string,
+  "description": string,
+  "nullable": boolean,
+  "enum": [
+    string
+  ],
+  "maxItems": integer,
+  "minItems": integer,
+  "properties": {
+    string: {
+      object (Schema)
+    },
+    ...
+  },
+  "required": [
+    string
+  ],
+  "propertyOrdering": [
+    string
+  ],
+  "items": {
+    object (Schema)
+  }
+}
+架构的 Type 必须是 OpenAPI 数据类型之一，或这些类型的并集（使用 anyOf）。每个 Type 仅有一部分字段有效。下表将每个 Type 映射到适用于相应类型的字段子集：
+
+string -> enum、format、nullable
+integer -> format、minimum、maximum、enum、nullable
+number -> format、minimum、maximum、enum、nullable
+boolean -> nullable
+array -> minItems、maxItems、items、nullable
+object -> properties、required、propertyOrdering、nullable
+以下是一些示例架构，展示了有效的类型和字段组合：
+
+
+{ "type": "string", "enum": ["a", "b", "c"] }
+
+{ "type": "string", "format": "date-time" }
+
+{ "type": "integer", "format": "int64" }
+
+{ "type": "number", "format": "double" }
+
+{ "type": "boolean" }
+
+{ "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": ... } }
+
+{ "type": "object",
+  "properties": {
+    "a": { "type": ... },
+    "b": { "type": ... },
+    "c": { "type": ... }
+  },
+  "nullable": true,
+  "required": ["c"],
+  "propertyOrdering": ["c", "b", "a"]
+}
+如需查看 Gemini API 中使用的架构字段的完整文档，请参阅架构参考。
+
+媒体资源排序
+警告： 配置 JSON 架构时，请务必设置 propertyOrdering[]；提供示例时，请确保示例中的属性顺序与架构一致。
+在 Gemini API 中使用 JSON 架构时，属性的顺序非常重要。默认情况下，该 API 会按字母顺序对属性进行排序，并且不会保留属性的定义顺序（不过 Google Gen AI SDK 可能会保留此顺序）。如果您向配置了架构的模型提供示例，但示例的属性顺序与架构的属性顺序不一致，则输出可能会杂乱无章或出乎意料。
+
+为确保属性的顺序一致且可预测，您可以使用可选的 propertyOrdering[] 字段。
+
+
+"propertyOrdering": ["recipeName", "ingredients"]
+propertyOrdering[]（不是 OpenAPI 规范中的标准字段）是一个字符串数组，用于确定响应中属性的顺序。通过指定属性的顺序，然后提供具有相同属性顺序的示例，您有望提高结果的质量。仅当您手动创建 types.Schema 时，系统才支持 propertyOrdering。
+
+Python 中的架构
+使用 Python 库时，response_schema 的值必须是以下值之一：
+
+一种类型，与您在类型注释中使用的类型相同（请参阅 Python typing 模块）
+genai.types.Schema 的实例
+genai.types.Schema 的 dict 等效项
+定义架构的最简单方法是使用 Pydantic 类型（如上一个示例所示）：
+
+Python
+
+config={'response_mime_type': 'application/json',
+        'response_schema': list[Recipe]}
+当您使用 Pydantic 类型时，Python 库会为您构建 JSON 架构并将其发送到 API。如需查看更多示例，请参阅 Python 库文档。
+
+Python 库支持使用以下类型定义的架构（其中 AllowedType 是任何允许的类型）：
+
+int
+float
+bool
+str
+list[AllowedType]
+AllowedType|AllowedType|...
+对于结构化类型：
+dict[str, AllowedType]。此注释声明所有字典值都应为同一类型，但未指定应包含哪些键。
+用户定义的 Pydantic 模型。这种方法可让您指定键名，并为与每个键关联的值定义不同的类型，包括嵌套结构。
+JSON 架构支持
+JSON 架构是比 OpenAPI 3.0 更新的规范，Schema 对象基于该规范。JSON 架构支持以预览版形式提供，通过字段 responseJsonSchema 实现，该字段接受任何 JSON 架构，但存在以下限制：
+
+它仅适用于 Gemini 2.5。
+虽然可以传递所有 JSON 架构属性，但并非所有属性都受支持。如需详细了解，请参阅相应字段的文档。
+递归引用只能用作非必需对象属性的值。
+递归引用会根据架构的大小展开到有限的程度。
+包含 $ref 的架构不能包含以 $ 开头以外的任何属性。
+以下示例展示了如何使用 Pydantic 生成 JSON 架构并将其提交给模型：
+
+
+curl "https://generativelanguage.googleapis.com/v1alpha/models/\
+gemini-2.5-flash:generateContent" \
+    -H "x-goog-api-key: $GEMINI_API_KEY"\
+    -H 'Content-Type: application/json' \
+    -d @- <<EOF
+{
+  "contents": [{
+    "parts":[{
+      "text": "Please give a random example following this schema"
+    }]
+  }],
+  "generationConfig": {
+    "response_mime_type": "application/json",
+    "response_json_schema": $(python3 - << PYEOF
+    from enum import Enum
+    from typing import List, Optional, Union, Set
+    from pydantic import BaseModel, Field, ConfigDict
+    import json
+
+    class UserRole(str, Enum):
+        ADMIN = "admin"
+        VIEWER = "viewer"
+
+    class Address(BaseModel):
+        street: str
+        city: str
+
+    class UserProfile(BaseModel):
+        username: str = Field(description="User's unique name")
+        age: Optional[int] = Field(ge=0, le=120)
+        roles: Set[UserRole] = Field(min_items=1)
+        contact: Union[Address, str]
+        model_config = ConfigDict(title="User Schema")
+
+    # Generate and print the JSON Schema
+    print(json.dumps(UserProfile.model_json_schema(), indent=2))
+    PYEOF
+    )
+  }
+}
+EOF
+使用 SDK 时，尚不支持直接传递 JSON 架构。
+
+最佳做法
+使用响应架构时，请谨记以下注意事项和最佳实践：
+
+回答架构的大小会计入输入 token 限制。
+默认情况下，字段是可选的，这意味着模型可以填充字段或跳过字段。您可以将字段设置为必填字段，以强制模型提供值。如果关联的输入提示中上下文不足，模型会主要基于其训练所依据的数据生成回答。
+复杂的架构可能会导致 InvalidArgument: 400 错误。复杂性可能来自属性名称过长、数组长度限制过长、枚举值过多、对象具有许多可选属性，或者是这些因素的组合。
+
+如果您在使用有效架构时看到此错误，请进行以下一项或多项更改以解决此错误：
+
+缩短属性名称或枚举名称。
+展平嵌套数组。
+减少存在限制的属性的数量，例如具有下限和上限的数量。
+减少存在复杂限制的属性的数量，例如采用 date-time 等复杂格式的属性。
+减少可选属性的数量。
+减少枚举的有效值数量。
