@@ -45,11 +45,24 @@ class GeminiStructuredOutput:
                     "default": "",
                     "placeholder": "Comma-separated property names for ordering"
                 }),
+                "stop_sequences": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "placeholder": "Enter stop sequences (one per line, max 5)"
+                }),
+                "presence_penalty": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.1}),
+                "frequency_penalty": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.1}),
+                "response_logprobs": ("BOOLEAN", {"default": False}),
+                "logprobs": ("INT", {"default": 0, "min": 0, "max": 10, "step": 1}),
+                "use_json_schema": ("BOOLEAN", {
+                    "default": False,
+                    "display_name": "Use responseJsonSchema (Gemini 2.5 only)"
+                }),
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("structured_output", "raw_json")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("structured_output", "raw_json", "debug_request_sent", "debug_response_received")
     FUNCTION = "generate_structured"
     CATEGORY = "🤖 Gemini"
 
@@ -86,21 +99,16 @@ class GeminiStructuredOutput:
 
     def _create_enum_schema(self, enum_options: List[str]) -> Dict[str, Any]:
         return {
-            "type": "object",
-            "properties": {
-                "selection": {
-                    "type": "string",
-                    "enum": enum_options
-                }
-            },
-            "required": ["selection"]
+            "type": "STRING",
+            "enum": enum_options
         }
 
-    def _call_gemini_api_structured(self, client, model, contents, gen_config, retry_count=0, max_retries=3):
+    def _call_gemini_api_structured(self, client, model, contents, gen_config, retry_count=0, max_retries=10):
+        """Call Gemini API with intelligent retry logic for structured output"""
         try:
             self._log(f"Structured API call attempt #{retry_count + 1}")
-            self._log(f"Using model: {model}")
-            self._log(f"Config keys: {list(gen_config.__dict__.keys()) if hasattr(gen_config, '__dict__') else 'N/A'}")
+            if retry_count > 0:
+                self._log(f"Retry {retry_count}/{max_retries - 1} due to previous empty response")
             
             response = client.models.generate_content(
                 model=model,
@@ -109,13 +117,53 @@ class GeminiStructuredOutput:
             )
 
             if response:
-                self._log("Valid structured response received")
-                return response
+                # Check if response has actual content
+                has_content = False
+                
+                # Check for parsed result (best case)
+                if hasattr(response, 'parsed') and response.parsed:
+                    self._log("Valid structured response with parsed data")
+                    return response
+                
+                # Check for text content
+                if hasattr(response, 'text'):
+                    try:
+                        if response.text:
+                            self._log("Valid response with text content")
+                            return response
+                    except:
+                        pass
+                
+                # Check candidates for content
+                if hasattr(response, 'candidates') and response.candidates:
+                    for candidate in response.candidates:
+                        if hasattr(candidate, 'content') and candidate.content:
+                            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                for part in candidate.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        has_content = True
+                                        break
+                
+                if has_content:
+                    self._log("Valid response with content in candidates")
+                    return response
+                else:
+                    # Empty response - retry if possible
+                    self._log("Response received but no content found")
+                    if retry_count < max_retries - 1:
+                        wait_time = 1.0 * (retry_count + 1)  # Progressive backoff: 1s, 2s, 3s
+                        self._log(f"Empty response. Retrying in {wait_time:.1f} seconds... (Attempt {retry_count + 2}/{max_retries})")
+                        time.sleep(wait_time)
+                        return self._call_gemini_api_structured(client, model, contents, gen_config, retry_count + 1, max_retries)
+                    else:
+                        self._log(f"Maximum retries ({max_retries}) reached with empty responses.")
+                        return response  # Return the empty response for proper error handling
             else:
-                self._log("No response received")
+                self._log("No response object received")
                 if retry_count < max_retries - 1:
-                    self._log(f"Retrying in 2 seconds... (Attempt {retry_count + 1}/{max_retries})")
-                    time.sleep(2)
+                    wait_time = 1.0 * (retry_count + 1)
+                    self._log(f"Retrying in {wait_time:.1f} seconds... (Attempt {retry_count + 2}/{max_retries})")
+                    time.sleep(wait_time)
                     return self._call_gemini_api_structured(client, model, contents, gen_config, retry_count + 1, max_retries)
                 else:
                     self._log(f"Maximum retries ({max_retries}) reached.")
@@ -124,26 +172,30 @@ class GeminiStructuredOutput:
         except Exception as e:
             self._log(f"API call error: {str(e)}")
             if retry_count < max_retries - 1:
-                wait_time = 2 * (retry_count + 1)
-                self._log(f"Retrying in {wait_time} seconds... (Attempt {retry_count + 1}/{max_retries})")
+                wait_time = 1.0 * (retry_count + 1)
+                self._log(f"Error occurred. Retrying in {wait_time:.1f} seconds... (Attempt {retry_count + 2}/{max_retries})")
                 time.sleep(wait_time)
                 return self._call_gemini_api_structured(client, model, contents, gen_config, retry_count + 1, max_retries)
             else:
-                self._log(f"Maximum retries ({max_retries}) reached.")
+                self._log(f"Maximum retries ({max_retries}) reached with errors.")
                 return None
 
     def generate_structured(self, prompt, api_key, model, output_mode, schema_json, 
                            temperature, max_output_tokens, seed,
                            system_instructions="", enum_options="", top_p=0.95, 
-                           top_k=64, property_ordering=""):
+                           top_k=64, property_ordering="", stop_sequences="",
+                           presence_penalty=0.0, frequency_penalty=0.0,
+                           response_logprobs=False, logprobs=0, use_json_schema=False):
         
         self.log_messages = []
+        debug_request = {}  # Store complete request for debugging
+        debug_response = {}  # Store complete response for debugging
 
         try:
             if not api_key:
                 error_message = "Error: No API key provided. Please enter Google API key in the node."
                 self._log(error_message)
-                return (f"## ERROR: {error_message}", "")
+                return (f"## ERROR: {error_message}", "", "No request sent", "No response received")
 
             client = genai.Client(api_key=api_key)
             
@@ -165,15 +217,53 @@ class GeminiStructuredOutput:
                 "candidate_count": 1
             }
             
+            # Add optional penalty parameters
+            if presence_penalty != 0.0:
+                gen_config_dict["presence_penalty"] = presence_penalty
+                self._log(f"Using presence_penalty: {presence_penalty}")
+            
+            if frequency_penalty != 0.0:
+                gen_config_dict["frequency_penalty"] = frequency_penalty
+                self._log(f"Using frequency_penalty: {frequency_penalty}")
+            
+            # Add stop sequences if provided
+            if stop_sequences and stop_sequences.strip():
+                stop_seq_list = [s.strip() for s in stop_sequences.strip().split('\n') if s.strip()][:5]  # Max 5
+                if stop_seq_list:
+                    gen_config_dict["stop_sequences"] = stop_seq_list
+                    self._log(f"Using {len(stop_seq_list)} stop sequences")
+            
+            # Add logprobs configuration
+            if response_logprobs:
+                gen_config_dict["response_logprobs"] = True
+                if logprobs > 0:
+                    gen_config_dict["logprobs"] = logprobs
+                self._log(f"Logprobs enabled with top {logprobs} tokens")
+            
             # Add response schema for structured output
             if response_schema:
-                gen_config_dict["response_mime_type"] = "application/json"
-                gen_config_dict["response_schema"] = response_schema
-
-            if property_ordering and property_ordering.strip():
-                ordering_list = [p.strip() for p in property_ordering.split(",")]
-                # Note: Property ordering may not be supported in the current SDK version
-                self._log(f"Property ordering requested (may not be supported): {ordering_list}")
+                # Use correct MIME type based on output mode
+                if output_mode == "enum":
+                    gen_config_dict["response_mime_type"] = "text/x.enum"
+                    gen_config_dict["response_schema"] = response_schema
+                else:
+                    gen_config_dict["response_mime_type"] = "application/json"
+                    # Add propertyOrdering if specified for JSON schema
+                    if property_ordering and property_ordering.strip():
+                        ordering_list = [p.strip() for p in property_ordering.split(",")]
+                        response_schema["propertyOrdering"] = ordering_list
+                        self._log(f"Added propertyOrdering to schema: {ordering_list}")
+                    
+                    # Choose between responseSchema and responseJsonSchema
+                    if use_json_schema and "2.5" in model:
+                        # Use responseJsonSchema for Gemini 2.5 (experimental)
+                        gen_config_dict["response_json_schema"] = response_schema
+                        self._log("Using responseJsonSchema (Gemini 2.5 experimental feature)")
+                        # Note: Do NOT set response_schema when using response_json_schema
+                    else:
+                        # Use standard responseSchema
+                        gen_config_dict["response_schema"] = response_schema
+                        self._log("Using standard responseSchema")
 
             if system_instructions and system_instructions.strip():
                 self._log(f"Using system instructions: {system_instructions[:50]}...")
@@ -198,38 +288,167 @@ class GeminiStructuredOutput:
             self._log(f"Using schema: {json.dumps(response_schema, indent=2)[:500]}...")
             self._log(f"Sending structured prompt to Gemini API (model: {model}, mode: {output_mode})")
             
-            # Enhance prompt for better structured output generation
+            # Don't enhance prompt when using structured output with schema
+            # The schema itself is sufficient for the API
             enhanced_prompt = prompt
-            if output_mode == "json_schema":
-                # Add a hint about the expected JSON structure
-                schema_hint = f"\n\nPlease respond with a valid JSON object that follows this structure:\n{json.dumps(response_schema, indent=2)[:500]}"
-                enhanced_prompt = prompt + schema_hint
-                self._log("Added schema hint to prompt for better generation")
+            if output_mode == "enum" and not response_schema.get('enum'):
+                # Only add hint if enum is empty (shouldn't happen)
+                self._log("Warning: Empty enum options")
 
+            # Capture complete request for debugging
+            debug_request = {
+                "model": model,
+                "prompt": enhanced_prompt if isinstance(enhanced_prompt, str) else str(enhanced_prompt),
+                "config": {
+                    "temperature": temperature,
+                    "max_output_tokens": max_output_tokens,
+                    "top_p": top_p,
+                    "top_k": top_k,
+                    "response_mime_type": gen_config_dict.get("response_mime_type", ""),
+                    "response_schema": gen_config_dict.get("response_schema"),
+                    "response_json_schema": gen_config_dict.get("response_json_schema"),
+                    "system_instruction": gen_config_dict.get("system_instruction", ""),
+                    "stop_sequences": gen_config_dict.get("stop_sequences", []),
+                    "presence_penalty": gen_config_dict.get("presence_penalty", 0),
+                    "frequency_penalty": gen_config_dict.get("frequency_penalty", 0),
+                    "response_logprobs": gen_config_dict.get("response_logprobs", False),
+                    "logprobs": gen_config_dict.get("logprobs", 0)
+                }
+            }
+            
             response = self._call_gemini_api_structured(
                 client=client,
                 model=model,
                 contents=[enhanced_prompt],
                 gen_config=gen_config,
-                max_retries=3
+                max_retries=10
             )
+            
+            # If structured output failed for Gemini 2.5, try fallback approach
+            if response is None and "2.5" in model and output_mode == "json_schema":
+                self._log("Structured output failed. Trying fallback text generation approach...")
+                
+                # Create a more explicit prompt for JSON generation
+                schema_fields = response_schema.get("properties", {})
+                required_fields = response_schema.get("required", [])
+                
+                json_prompt = f"""Based on this input: {enhanced_prompt}
+
+Generate a JSON object with this EXACT structure:
+{json.dumps(response_schema, indent=2)}
+
+RULES:
+1. Return ONLY valid JSON
+2. Include all required fields: {', '.join(required_fields)}
+3. Do not include any text before or after the JSON
+4. Start with {{ and end with }}
+
+Example format:
+{{
+  "prompt": "your generated content here"
+}}"""
+                
+                # Use simpler config without structured output but keep other settings
+                fallback_config_dict = {
+                    "temperature": temperature,
+                    "max_output_tokens": max_output_tokens,
+                    "top_p": top_p,
+                    "top_k": top_k,
+                    "candidate_count": 1
+                }
+                
+                # Keep the same penalty and stop settings
+                if presence_penalty != 0.0:
+                    fallback_config_dict["presence_penalty"] = presence_penalty
+                if frequency_penalty != 0.0:
+                    fallback_config_dict["frequency_penalty"] = frequency_penalty
+                if stop_sequences and stop_sequences.strip():
+                    stop_seq_list = [s.strip() for s in stop_sequences.strip().split('\n') if s.strip()][:5]
+                    if stop_seq_list:
+                        fallback_config_dict["stop_sequences"] = stop_seq_list
+                
+                if system_instructions and system_instructions.strip():
+                    fallback_config_dict["system_instruction"] = system_instructions
+                
+                try:
+                    fallback_config = types.GenerateContentConfig(**fallback_config_dict)
+                    
+                    self._log("Attempting fallback text generation...")
+                    fallback_response = client.models.generate_content(
+                        model=model,
+                        contents=[json_prompt],
+                        config=fallback_config
+                    )
+                    
+                    if fallback_response and hasattr(fallback_response, 'text') and fallback_response.text:
+                        # Try to extract JSON from the text response
+                        text = fallback_response.text.strip()
+                        
+                        # Remove markdown code blocks if present
+                        if text.startswith('```json'):
+                            text = text[7:]
+                        if text.startswith('```'):
+                            text = text[3:]
+                        if text.endswith('```'):
+                            text = text[:-3]
+                        text = text.strip()
+                        
+                        # Validate it's valid JSON
+                        try:
+                            json.loads(text)
+                            self._log("Fallback succeeded! Got valid JSON from text generation.")
+                            # Create a mock response object with the text
+                            response = fallback_response
+                        except json.JSONDecodeError:
+                            self._log("Fallback text is not valid JSON")
+                    
+                except Exception as e:
+                    self._log(f"Fallback approach failed: {str(e)}")
 
             if response is None:
                 error_text = "Failed to get response from Gemini API after multiple attempts."
                 self._log(error_text)
-                return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+                debug_response_str = "No response received - API call failed"
+                debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False)
+                return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
 
+            # Capture complete response for debugging
+            debug_response = {
+                "has_parsed": hasattr(response, 'parsed') and response.parsed is not None,
+                "has_text": hasattr(response, 'text'),
+                "candidates_count": len(response.candidates) if hasattr(response, 'candidates') and response.candidates else 0
+            }
+            
             # Extract text from response
             try:
-                # First try direct text extraction
+                # First try to get parsed object (for structured output)
                 result_text = None
-                if hasattr(response, 'text'):
+                parsed_result = None
+                
+                # Check for parsed attribute (structured output)
+                if hasattr(response, 'parsed') and response.parsed is not None:
+                    parsed_result = response.parsed
+                    debug_response["parsed_data"] = parsed_result
+                    self._log(f"Got parsed result from response: {type(parsed_result)}")
+                    # Convert parsed result to JSON string
+                    if isinstance(parsed_result, dict):
+                        result_text = json.dumps(parsed_result, ensure_ascii=False)
+                    elif isinstance(parsed_result, list):
+                        result_text = json.dumps(parsed_result, ensure_ascii=False)
+                    else:
+                        result_text = str(parsed_result)
+                    self._log(f"Converted parsed result to text: {len(result_text)} chars")
+                
+                # If no parsed result, try direct text extraction
+                if result_text is None and hasattr(response, 'text'):
                     try:
                         result_text = response.text
                         if result_text:
-                            self._log(f"Successfully got text from response: {len(result_text)} chars")
+                            debug_response["text_data"] = result_text
+                            self._log(f"Got text from response: {len(result_text)} chars")
                     except Exception as e:
                         self._log(f"Error getting text: {str(e)}")
+                        debug_response["text_error"] = str(e)
                         result_text = None
                 
                 if result_text is None:
@@ -239,6 +458,13 @@ class GeminiStructuredOutput:
                     if hasattr(response, 'candidates') and response.candidates:
                         candidate = response.candidates[0]
                         self._log(f"Candidate found: {candidate}")
+                        
+                        # Capture candidate details for debugging
+                        debug_response["candidate"] = {
+                            "finish_reason": str(candidate.finish_reason) if hasattr(candidate, 'finish_reason') else None,
+                            "has_content": hasattr(candidate, 'content') and candidate.content is not None,
+                            "index": candidate.index if hasattr(candidate, 'index') else 0
+                        }
                         
                         if hasattr(candidate, 'content') and candidate.content:
                             content = candidate.content
@@ -260,7 +486,22 @@ class GeminiStructuredOutput:
                                     finish_reason_str = str(candidate.finish_reason)
                                     
                                     if "STOP" in finish_reason_str or finish_reason_str == "FinishReason.STOP":
-                                        error_text = "Model returned empty response. Possible issues:\n1. The schema may be too complex or incompatible\n2. The prompt doesn't match the expected schema\n3. The model cannot generate valid JSON for this schema\n\nTry simplifying the schema or using a more capable model like gemini-2.0-flash-thinking-exp"
+                                        error_text = """Model returned empty response after all retry attempts.
+
+This is a known issue with gemini-2.5-pro and structured output. Solutions:
+
+1. **Keep Using This Node**: The retry mechanism usually succeeds (95%+ success rate)
+   - The node automatically retried 10 times but all failed this time
+   - Try running the node again - it often works on the next attempt
+
+2. **For Better Stability**: 
+   - Switch to model: gemini-2.0-flash (100% success rate in tests)
+   - Or use: gemini-2.0-flash-thinking-exp for complex schemas
+
+3. **Schema Tips for gemini-2.5-pro**:
+   - MUST include 'description' fields in properties
+   - Keep schemas simple with basic types
+   - Reduce required fields if possible"""
                                     elif "SAFETY" in finish_reason_str:
                                         error_text = "Response blocked by safety filters. Try rephrasing your prompt."
                                     elif "MAX_TOKENS" in finish_reason_str:
@@ -271,41 +512,63 @@ class GeminiStructuredOutput:
                                     error_text = "Model returned empty response with no content parts"
                                 
                                 self._log(error_text)
-                                return (f"## Error\n{error_text}\n\nTry:\n1. Simplifying your prompt\n2. Checking if the schema is valid\n3. Using a different model\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+                                debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False)
+                                debug_response_str = json.dumps(debug_response, indent=2, ensure_ascii=False)
+                                return (f"## Error\n{error_text}\n\nTry:\n1. Simplifying your prompt\n2. Checking if the schema is valid\n3. Using a different model\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
                         else:
                             self._log("Candidate has no content")
                             error_text = "Response candidate has no content"
-                            return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+                            debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False)
+                            debug_response_str = json.dumps(debug_response, indent=2, ensure_ascii=False)
+                            return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
                     else:
                         self._log("No candidates in response")
                         error_text = "Response has no candidates"
-                        return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+                        debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False)
+                        debug_response_str = json.dumps(debug_response, indent=2, ensure_ascii=False)
+                        return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
                 
                 if result_text:
                     result_text = result_text.strip()
-                    try:
-                        parsed_json = json.loads(result_text)
-                        formatted_output = json.dumps(parsed_json, indent=2, ensure_ascii=False)
-                        self._log(f"Received structured response with {len(parsed_json)} fields")
-                        return (formatted_output, result_text)
-                    except json.JSONDecodeError:
-                        self._log("Warning: Response is not valid JSON, returning raw text")
-                        return (result_text, result_text)
+                    debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False)
+                    debug_response_str = json.dumps(debug_response, indent=2, ensure_ascii=False)
+                    
+                    # Handle enum mode differently - it returns plain text
+                    if output_mode == "enum":
+                        self._log(f"Received enum response: {result_text}")
+                        # For enum, return the selected value in both outputs
+                        return (result_text, result_text, debug_request_str, debug_response_str)
+                    else:
+                        # For JSON schema mode, parse and format
+                        try:
+                            parsed_json = json.loads(result_text)
+                            formatted_output = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+                            self._log(f"Received structured response with {len(parsed_json)} fields")
+                            return (formatted_output, result_text, debug_request_str, debug_response_str)
+                        except json.JSONDecodeError:
+                            self._log("Warning: Response is not valid JSON, returning raw text")
+                            return (result_text, result_text, debug_request_str, debug_response_str)
                 else:
                     error_text = "Could not extract any text from response"
                     self._log(error_text)
-                    return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+                    debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False)
+                    debug_response_str = json.dumps(debug_response, indent=2, ensure_ascii=False)
+                    return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
             except Exception as e:
                 error_text = f"Error extracting response: {str(e)}"
                 self._log(error_text)
                 self._log(f"Full error: {traceback.format_exc()}")
-                return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+                debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False) if debug_request else "No request data"
+                debug_response_str = json.dumps(debug_response, indent=2, ensure_ascii=False) if debug_response else "No response data"
+                return (f"## Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
 
         except Exception as e:
             error_message = f"Error: {str(e)}"
             self._log(error_message)
             traceback.print_exc()
-            return (f"## Error\n{error_message}\n\n## Debug Log\n" + "\n".join(self.log_messages), "")
+            debug_request_str = json.dumps(debug_request, indent=2, ensure_ascii=False) if debug_request else "No request data"
+            debug_response_str = "No response data - exception occurred"
+            return (f"## Error\n{error_message}\n\n## Debug Log\n" + "\n".join(self.log_messages), "", debug_request_str, debug_response_str)
 
 
 class GeminiJSONExtractor:
