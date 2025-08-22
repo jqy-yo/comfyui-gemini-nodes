@@ -52,17 +52,23 @@ class GeminiVideoCaptioner:
                 "video_path": ("STRING", {"default": ""}),
                 "image": ("IMAGE", {}),
                 "api_version": (["auto", "v1", "v1beta", "v1alpha"], {"default": "auto"}),
+                "use_structured_output": ("BOOLEAN", {"default": False}),
+                "output_schema": ("STRING", {
+                    "multiline": True,
+                    "default": '{\n  "type": "object",\n  "properties": {\n    "description": {"type": "string"},\n    "objects": {\n      "type": "array",\n      "items": {"type": "string"}\n    },\n    "actions": {\n      "type": "array",\n      "items": {"type": "string"}\n    },\n    "mood": {"type": "string"},\n    "technical_details": {"type": "string"}\n  },\n  "required": ["description", "objects", "actions", "mood"]\n}',
+                    "placeholder": "Enter JSON Schema for structured output..."
+                }),
             }
         }
 
-    RETURN_TYPES = ("STRING", "IMAGE",)
-    RETURN_NAMES = ("caption", "sampled_frame",)
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING",)
+    RETURN_NAMES = ("caption", "sampled_frame", "raw_json",)
     FUNCTION = "generate_video_caption"
     CATEGORY = "🤖 Gemini"
 
     def generate_video_caption(self, api_key, model, frames_per_second, max_duration_minutes,
                                prompt, process_audio, temperature, max_output_tokens, top_p, top_k, seed,
-                               video_path=None, image=None, api_version="auto"):
+                               video_path=None, image=None, api_version="auto", use_structured_output=False, output_schema=None):
         if not api_key:
             raise ValueError("Gemini API key is required")
 
@@ -131,6 +137,7 @@ class GeminiVideoCaptioner:
                 sample_frame_tensor = torch.from_numpy(sample_frame_np)[None,]
 
             # If WebM conversion failed, fall back to frame extraction
+            raw_json = ""  # Initialize raw_json
             if webm_path is None:
                 print(f"[GeminiVideoCaptioner] WebM conversion failed, falling back to frame extraction...")
                 frames, frame_timestamps = self.extract_frames(video_path, frames_per_second, max_seconds)
@@ -140,7 +147,7 @@ class GeminiVideoCaptioner:
                 print(f"[GeminiVideoCaptioner] Extracted {len(frames)} frames at {frames_per_second} fps")
 
                 # Generate captions for frames
-                caption = self.get_caption_with_frames(
+                caption, raw_json = self.get_caption_with_frames(
                     api_key,
                     frames,
                     prompt,
@@ -150,7 +157,9 @@ class GeminiVideoCaptioner:
                     top_p,
                     top_k,
                     seed,
-                    api_version
+                    api_version,
+                    use_structured_output,
+                    output_schema
                 )
             else:
                 # Use the WebM file for captioning
@@ -158,7 +167,7 @@ class GeminiVideoCaptioner:
                 print(f"[GeminiVideoCaptioner] Using WebM video for captioning")
 
                 # Get caption using the WebM file
-                caption = self.get_caption_with_video_file(
+                caption, raw_json = self.get_caption_with_video_file(
                     api_key,
                     webm_path,
                     mime_type,
@@ -170,13 +179,15 @@ class GeminiVideoCaptioner:
                     top_p,
                     top_k,
                     seed,
-                    api_version
+                    api_version,
+                    use_structured_output,
+                    output_schema
                 )
 
                 # Clean up temporary WebM file
                 os.unlink(webm_path)
 
-            return (caption, sample_frame_tensor)
+            return (caption, sample_frame_tensor, raw_json)
 
         else:
             # Processing an image batch
@@ -197,11 +208,12 @@ class GeminiVideoCaptioner:
             # Choose a middle frame as sample output
             middle_idx = len(frames) // 2
             sample_frame_tensor = image[middle_idx].unsqueeze(0) if image.shape[0] > 0 else None
+            raw_json = ""  # Initialize raw_json
 
             # If only one frame is provided and it's a newer model, send as JPEG directly
             if len(frames) == 1 and model in ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"]:
                 print(f"[GeminiVideoCaptioner] Single frame input for {model}, using direct frame processing (JPEG).")
-                caption = self.get_caption_with_frames(
+                caption, raw_json = self.get_caption_with_frames(
                     api_key,
                     frames,  # This will be a list with one frame
                     prompt,
@@ -211,7 +223,9 @@ class GeminiVideoCaptioner:
                     top_p,
                     top_k,
                     seed,
-                    api_version
+                    api_version,
+                    use_structured_output,
+                    output_schema
                 )
             else:
                 # Original logic: try to create WebM, then send video file or fallback to frames
@@ -220,7 +234,7 @@ class GeminiVideoCaptioner:
 
                 if webm_path is None:
                     print(f"[GeminiVideoCaptioner] WebM creation failed, falling back to frame processing...")
-                    caption = self.get_caption_with_frames(
+                    caption, raw_json = self.get_caption_with_frames(
                         api_key,
                         frames,
                         prompt,
@@ -230,12 +244,14 @@ class GeminiVideoCaptioner:
                         top_p,
                         top_k,
                         seed,
-                        api_version
+                        api_version,
+                        use_structured_output,
+                        output_schema
                     )
                 else:
                     mime_type = "video/webm"
                     print(f"[GeminiVideoCaptioner] Using WebM video for captioning")
-                    caption = self.get_caption_with_video_file(
+                    caption, raw_json = self.get_caption_with_video_file(
                         api_key,
                         webm_path,
                         mime_type,
@@ -247,11 +263,13 @@ class GeminiVideoCaptioner:
                         top_p,
                         top_k,
                         seed,
-                        api_version
+                        api_version,
+                        use_structured_output,
+                        output_schema
                     )
                     os.unlink(webm_path) # Clean up temporary WebM file
 
-            return (caption, sample_frame_tensor)
+            return (caption, sample_frame_tensor, raw_json)
 
     def get_video_info(self, video_path):
         """Get basic information about the video file"""
@@ -347,7 +365,7 @@ class GeminiVideoCaptioner:
             )
 
     def get_caption_with_frames(self, api_key, frames, prompt, model, temperature, max_output_tokens, top_p, top_k,
-                                seed, api_version="auto"):
+                                seed, api_version="auto", use_structured_output=False, output_schema=None):
         """Send individual frames to Gemini API using google-genai SDK"""
         # Create client with API key
         client = genai.Client(api_key=api_key)
@@ -412,21 +430,53 @@ class GeminiVideoCaptioner:
         if not (model.startswith("gemini-1.0") or "gemini-1.0" in model):
             content_parts.append({"text": prompt})
 
+        # Parse schema if structured output is enabled
+        response_schema = None
+        if use_structured_output and output_schema:
+            try:
+                response_schema = json.loads(output_schema)
+                print(f"[GeminiVideoCaptioner] Using structured output with schema")
+            except json.JSONDecodeError as e:
+                print(f"[GeminiVideoCaptioner] Warning: Invalid JSON schema, falling back to regular output: {e}")
+                use_structured_output = False
+
         # Create generation config for SDK
-        gen_config = types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
-            top_p=top_p,
-            top_k=top_k,
-            candidate_count=1
-        )
+        gen_config_dict = {
+            "temperature": temperature,
+            "max_output_tokens": max_output_tokens,
+            "top_p": top_p,
+            "top_k": top_k,
+            "candidate_count": 1
+        }
+        
+        # Add structured output if enabled
+        if use_structured_output and response_schema:
+            gen_config_dict["response_mime_type"] = "application/json"
+            gen_config_dict["response_schema"] = response_schema
+        
+        gen_config = types.GenerateContentConfig(**gen_config_dict)
         
         # Send request using SDK
         print(f"[GeminiVideoCaptioner] Sending request to Gemini API ({model})...")
-        return self._send_api_request(client, model, content_parts, gen_config)
+        result = self._send_api_request(client, model, content_parts, gen_config, use_structured_output)
+        
+        # Handle structured vs regular output
+        if use_structured_output and isinstance(result, tuple):
+            return result  # Already (formatted, raw_json) tuple
+        elif use_structured_output:
+            # Try to parse as JSON
+            try:
+                parsed = json.loads(result)
+                formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
+                return (formatted, result)
+            except:
+                return (result, result)
+        else:
+            return (result, "")  # Regular output, no raw_json
 
     def get_caption_with_video_file(self, api_key, video_path, mime_type, prompt, model,
-                                    process_audio, temperature, max_output_tokens, top_p, top_k, seed, api_version="auto"):
+                                    process_audio, temperature, max_output_tokens, top_p, top_k, seed, api_version="auto",
+                                    use_structured_output=False, output_schema=None):
         """Send entire video file to Gemini API using google-genai SDK (for Gemini 1.5+ models)"""
         # Create client with API key
         client = genai.Client(api_key=api_key)
@@ -487,18 +537,49 @@ class GeminiVideoCaptioner:
             "text": prompt
         }]
 
+        # Parse schema if structured output is enabled
+        response_schema = None
+        if use_structured_output and output_schema:
+            try:
+                response_schema = json.loads(output_schema)
+                print(f"[GeminiVideoCaptioner] Using structured output with schema")
+            except json.JSONDecodeError as e:
+                print(f"[GeminiVideoCaptioner] Warning: Invalid JSON schema, falling back to regular output: {e}")
+                use_structured_output = False
+
         # Create generation config
-        gen_config = types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
-            top_p=top_p,
-            top_k=top_k,
-            candidate_count=1
-        )
+        gen_config_dict = {
+            "temperature": temperature,
+            "max_output_tokens": max_output_tokens,
+            "top_p": top_p,
+            "top_k": top_k,
+            "candidate_count": 1
+        }
+        
+        # Add structured output if enabled
+        if use_structured_output and response_schema:
+            gen_config_dict["response_mime_type"] = "application/json"
+            gen_config_dict["response_schema"] = response_schema
+        
+        gen_config = types.GenerateContentConfig(**gen_config_dict)
 
         # Send request using SDK
         print(f"[GeminiVideoCaptioner] Sending video to Gemini API ({model})...")
-        return self._send_api_request(client, model, content_parts, gen_config)
+        result = self._send_api_request(client, model, content_parts, gen_config, use_structured_output)
+        
+        # Handle structured vs regular output
+        if use_structured_output and isinstance(result, tuple):
+            return result  # Already (formatted, raw_json) tuple
+        elif use_structured_output:
+            # Try to parse as JSON
+            try:
+                parsed = json.loads(result)
+                formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
+                return (formatted, result)
+            except:
+                return (result, result)
+        else:
+            return (result, "")  # Regular output, no raw_json
 
     def convert_to_webm(self, input_path, max_size_mb=29):
         """Convert any video to WebM format with size limit using OpenCV
@@ -754,13 +835,14 @@ class GeminiVideoCaptioner:
             if out is not None:
                 out.release()
 
-    def _send_api_request(self, client, model, contents, config, retry_count=0, max_retries=3):
+    def _send_api_request(self, client, model, contents, config, use_structured=False, retry_count=0, max_retries=3):
         """Helper method to send API request using google-genai SDK"""
         try:
             # Debug logging for request
             print(f"[DEBUG] Sending request using google-genai SDK")
             print(f"[DEBUG] Model: {model}")
             print(f"[DEBUG] Number of content parts: {len(contents)}")
+            print(f"[DEBUG] Structured output: {use_structured}")
 
             response = client.models.generate_content(
                 model=model,
@@ -773,11 +855,30 @@ class GeminiVideoCaptioner:
                 print("[DEBUG] Valid API response received")
                 print(f"[DEBUG] Response type: {type(response)}")
                 
+                # For structured output, check for parsed result first
+                if use_structured and hasattr(response, 'parsed') and response.parsed:
+                    print(f"[DEBUG] Got parsed structured result")
+                    parsed_result = response.parsed
+                    if isinstance(parsed_result, dict):
+                        formatted = json.dumps(parsed_result, indent=2, ensure_ascii=False)
+                        raw = json.dumps(parsed_result, ensure_ascii=False)
+                        return (formatted, raw)
+                    else:
+                        return (str(parsed_result), str(parsed_result))
+                
                 # Try to get text directly
                 if hasattr(response, 'text'):
                     text = response.text
                     if text:
                         print(f"[DEBUG] Successfully extracted text: {len(text)} chars")
+                        if use_structured:
+                            # Try to parse as JSON for structured output
+                            try:
+                                parsed = json.loads(text)
+                                formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
+                                return (formatted, text)
+                            except:
+                                return (text, text)
                         return text
                 
                 # Try to extract from candidates
@@ -795,24 +896,40 @@ class GeminiVideoCaptioner:
                                 if hasattr(part, 'text') and part.text:
                                     text = part.text
                                     print(f"[DEBUG] Extracted text from part {i}: {len(text)} chars")
+                                    if use_structured:
+                                        # Try to parse as JSON for structured output
+                                        try:
+                                            parsed = json.loads(text)
+                                            formatted = json.dumps(parsed, indent=2, ensure_ascii=False)
+                                            return (formatted, text)
+                                        except:
+                                            return (text, text)
                                     return text
                         else:
                             # Handle safety blocks or empty responses
+                            error_msg = ""
                             if hasattr(candidate, 'finish_reason'):
                                 if str(candidate.finish_reason) == "STOP":
-                                    return "Error: Model returned empty response. The prompt may have been blocked or the model had nothing to generate."
+                                    error_msg = "Error: Model returned empty response. The prompt may have been blocked or the model had nothing to generate."
                                 elif "SAFETY" in str(candidate.finish_reason):
-                                    return "Error: Response blocked by safety filters. Try rephrasing your prompt."
+                                    error_msg = "Error: Response blocked by safety filters. Try rephrasing your prompt."
                                 else:
-                                    return f"Error: Model stopped with reason: {candidate.finish_reason}"
-                            return "Error: Model returned empty response"
+                                    error_msg = f"Error: Model stopped with reason: {candidate.finish_reason}"
+                            else:
+                                error_msg = "Error: Model returned empty response"
+                            
+                            if use_structured:
+                                return (error_msg, "")
+                            return error_msg
                 
                 # No valid response found
                 print(f"[DEBUG] Could not extract text from response")
                 if retry_count < max_retries - 1:
                     print(f"[DEBUG] Retrying... (Attempt {retry_count + 1}/{max_retries})")
                     time.sleep(2 * (retry_count + 1))  # Progressive backoff
-                    return self._send_api_request(client, model, contents, config, retry_count + 1, max_retries)
+                    return self._send_api_request(client, model, contents, config, use_structured, retry_count + 1, max_retries)
+                if use_structured:
+                    return ("Failed to get caption from Gemini API: unexpected response format", "")
                 return "Failed to get caption from Gemini API: unexpected response format"
             
             else:
@@ -820,7 +937,9 @@ class GeminiVideoCaptioner:
                 if retry_count < max_retries - 1:
                     print(f"[DEBUG] Retrying... (Attempt {retry_count + 1}/{max_retries})")
                     time.sleep(2 * (retry_count + 1))
-                    return self._send_api_request(client, model, contents, config, retry_count + 1, max_retries)
+                    return self._send_api_request(client, model, contents, config, use_structured, retry_count + 1, max_retries)
+                if use_structured:
+                    return ("Error: No response from Gemini API after multiple attempts", "")
                 return "Error: No response from Gemini API after multiple attempts"
 
         except Exception as e:
@@ -833,6 +952,8 @@ class GeminiVideoCaptioner:
                 wait_time = 2 * (retry_count + 1)  # Progressive backoff
                 print(f"[GeminiVideoCaptioner] Retrying in {wait_time} seconds... (Attempt {retry_count + 1}/{max_retries})")
                 time.sleep(wait_time)
-                return self._send_api_request(client, model, contents, config, retry_count + 1, max_retries)
+                return self._send_api_request(client, model, contents, config, use_structured, retry_count + 1, max_retries)
             
+            if use_structured:
+                return (f"Error: {error_msg}", "")
             return f"Error: {error_msg}"
