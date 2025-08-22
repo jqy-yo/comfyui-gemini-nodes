@@ -151,7 +151,12 @@ class GeminiStructuredOutput:
                     # Empty response - retry if possible
                     self._log("Response received but no content found")
                     if retry_count < max_retries - 1:
-                        wait_time = 1.0 * (retry_count + 1)  # Progressive backoff: 1s, 2s, 3s
+                        # First 5 retries: wait 5 seconds each
+                        # Last 5 retries: progressive backoff (6s, 7s, 8s, 9s, 10s)
+                        if retry_count < 5:
+                            wait_time = 5.0
+                        else:
+                            wait_time = 1.0 * (retry_count + 1)
                         self._log(f"Empty response. Retrying in {wait_time:.1f} seconds... (Attempt {retry_count + 2}/{max_retries})")
                         time.sleep(wait_time)
                         return self._call_gemini_api_structured(client, model, contents, gen_config, retry_count + 1, max_retries)
@@ -161,7 +166,12 @@ class GeminiStructuredOutput:
             else:
                 self._log("No response object received")
                 if retry_count < max_retries - 1:
-                    wait_time = 1.0 * (retry_count + 1)
+                    # First 5 retries: wait 5 seconds each
+                    # Last 5 retries: progressive backoff (6s, 7s, 8s, 9s, 10s)
+                    if retry_count < 5:
+                        wait_time = 5.0
+                    else:
+                        wait_time = 1.0 * (retry_count + 1)
                     self._log(f"Retrying in {wait_time:.1f} seconds... (Attempt {retry_count + 2}/{max_retries})")
                     time.sleep(wait_time)
                     return self._call_gemini_api_structured(client, model, contents, gen_config, retry_count + 1, max_retries)
@@ -172,7 +182,12 @@ class GeminiStructuredOutput:
         except Exception as e:
             self._log(f"API call error: {str(e)}")
             if retry_count < max_retries - 1:
-                wait_time = 1.0 * (retry_count + 1)
+                # First 5 retries: wait 5 seconds each
+                # Last 5 retries: progressive backoff (6s, 7s, 8s, 9s, 10s)
+                if retry_count < 5:
+                    wait_time = 5.0
+                else:
+                    wait_time = 1.0 * (retry_count + 1)
                 self._log(f"Error occurred. Retrying in {wait_time:.1f} seconds... (Attempt {retry_count + 2}/{max_retries})")
                 time.sleep(wait_time)
                 return self._call_gemini_api_structured(client, model, contents, gen_config, retry_count + 1, max_retries)
