@@ -22,6 +22,7 @@
 - **图像生成**: 支持多参考图像的批量图像生成
 - **视频分析**: 智能视频字幕和分析
 - **JSON 处理**: 提取、解析和操作 JSON 数据
+- **API 调试**: 所有处理节点现在都输出完整的 API 请求/响应用于调试
 
 ## 安装
 
@@ -81,6 +82,8 @@ export GOOGLE_API_KEY="your-api-key-here"
 
 **输出：**
 - `response`（STRING）：生成的文本响应
+- `api_request`（STRING）：发送到 Gemini 的完整 API 请求（JSON 格式）
+- `api_response`（STRING）：来自 Gemini 的完整 API 响应（JSON 格式）
 
 **使用示例：**
 1. 基础文本生成：提示词="写一首关于人工智能的俳句"，温度=0.8
@@ -108,6 +111,8 @@ export GOOGLE_API_KEY="your-api-key-here"
 **输出：**
 - `structured_output`（STRING）：格式化的 JSON 输出
 - `raw_json`（STRING）：原始 JSON 响应
+- `debug_request_sent`（STRING）：发送到 Gemini 的完整 API 请求（JSON 格式）
+- `debug_response_received`（STRING）：来自 Gemini 的完整 API 响应（JSON 格式）
 
 **Schema 示例：**
 ```json
@@ -251,6 +256,12 @@ JSON 输入：{"user": {"name": "张三", "email": "zhang@example.com"}}
 - `image1` 到 `image4`（IMAGE，可选）：用于风格/内容指导的参考图像
 - `api_version`（ENUM，可选）：API 版本
 
+**输出：**
+- `image`（IMAGE）：生成的图像批次
+- `API Respond`（STRING）：API 响应信息
+- `api_request`（STRING）：发送到 Gemini 的完整 API 请求（JSON 格式）
+- `api_response`（STRING）：来自 Gemini 的完整 API 响应（JSON 格式）
+
 **功能：**
 - 自动图像填充至最小 1024x1024（白色边框）
 - 批量生成的异步并行处理
@@ -283,6 +294,12 @@ JSON 输入：{"user": {"name": "张三", "email": "zhang@example.com"}}
 - `input_image_X`（IMAGE）：插槽 X 的参考图像
 - `input_prompt_X`（STRING）：插槽 X 的生成提示
 - 其中 X 范围从 1 到 inputcount
+
+**输出：**
+- `images`（IMAGE）：所有生成的图像在单个批次中
+- `API_responses`（STRING）：详细的 API 响应信息
+- `api_request`（STRING）：发送到 Gemini 的完整 API 请求（JSON 格式）
+- `api_response`（STRING）：来自 Gemini 的完整 API 响应（JSON 格式）
 
 **功能：**
 - 所有插槽的异步并行处理
@@ -326,6 +343,9 @@ JSON 输入：{"user": {"name": "张三", "email": "zhang@example.com"}}
 **输出：**
 - `caption`（STRING）：生成的视频描述/字幕
 - `sampled_frame`（IMAGE）：视频的代表性帧
+- `raw_json`（STRING）：原始 JSON 响应（用于结构化输出模式）
+- `api_request`（STRING）：发送到 Gemini 的完整 API 请求（JSON 格式）
+- `api_response`（STRING）：来自 Gemini 的完整 API 响应（JSON 格式）
 
 **使用示例：**
 1. 基础视频描述："描述这个视频中发生了什么"，FPS=1.0
@@ -395,6 +415,18 @@ JSON 输入：{"user": {"name": "张三", "email": "zhang@example.com"}}
 - 结合结构化输出进行数据提取
 
 ## 故障排除
+
+### API 调试
+所有处理节点现在都包含 `api_request` 和 `api_response` 输出用于调试：
+- **api_request**：发送到 Gemini API 的完整请求（JSON 格式）
+- **api_response**：来自 Gemini API 的完整响应（JSON 格式）
+
+使用这些输出可以：
+- 调试 API 通信问题
+- 了解确切的请求格式
+- 分析响应结构
+- 跟踪令牌使用和成本
+- 识别速率限制问题
 
 ### 常见问题
 

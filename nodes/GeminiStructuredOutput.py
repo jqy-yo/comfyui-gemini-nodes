@@ -77,10 +77,35 @@ class GeminiStructuredOutput:
             self.log_messages.append(message)
         return message
 
+    def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove additionalProperties field from JSON schema for Gemini API compatibility"""
+        # Gemini API does not support additionalProperties
+        # Error: "additional_properties parameter is not supported in Gemini API"
+        
+        def clean_dict(obj):
+            if isinstance(obj, dict):
+                # Remove additionalProperties field
+                cleaned = {k: v for k, v in obj.items() if k != 'additionalProperties'}
+                # Recursively clean nested objects
+                for key, value in cleaned.items():
+                    if isinstance(value, dict):
+                        cleaned[key] = clean_dict(value)
+                    elif isinstance(value, list):
+                        cleaned[key] = [clean_dict(item) if isinstance(item, dict) else item for item in value]
+                return cleaned
+            return obj
+        
+        cleaned_schema = clean_dict(schema)
+        if 'additionalProperties' in schema:
+            self._log("Removed 'additionalProperties' field from schema for Gemini API compatibility")
+        return cleaned_schema
+    
     def _parse_schema(self, schema_json: str) -> Dict[str, Any]:
         try:
             schema = json.loads(schema_json)
-            self._log(f"Schema parsed successfully: {list(schema.get('properties', {}).keys())}")
+            # Clean the schema for Gemini API
+            schema = self._clean_schema_for_gemini(schema)
+            self._log(f"Schema parsed and cleaned successfully: {list(schema.get('properties', {}).keys())}")
             return schema
         except json.JSONDecodeError as e:
             self._log(f"Error parsing schema JSON: {str(e)}")
@@ -219,6 +244,7 @@ class GeminiStructuredOutput:
 
             if output_mode == "json_schema":
                 response_schema = self._parse_schema(schema_json)
+                self._log(f"Using cleaned schema: {json.dumps(response_schema, indent=2)[:500]}...")
             else:
                 enum_list = self._parse_enum_options(enum_options)
                 response_schema = self._create_enum_schema(enum_list)
@@ -631,6 +657,29 @@ class GeminiJSONExtractor:
             self.log_messages.append(message)
         return message
 
+    def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove additionalProperties field from JSON schema for Gemini API compatibility"""
+        # Gemini API does not support additionalProperties
+        # Error: "additional_properties parameter is not supported in Gemini API"
+        
+        def clean_dict(obj):
+            if isinstance(obj, dict):
+                # Remove additionalProperties field
+                cleaned = {k: v for k, v in obj.items() if k != 'additionalProperties'}
+                # Recursively clean nested objects
+                for key, value in cleaned.items():
+                    if isinstance(value, dict):
+                        cleaned[key] = clean_dict(value)
+                    elif isinstance(value, list):
+                        cleaned[key] = [clean_dict(item) if isinstance(item, dict) else item for item in value]
+                return cleaned
+            return obj
+        
+        cleaned_schema = clean_dict(schema)
+        if 'additionalProperties' in schema:
+            self._log("Removed 'additionalProperties' field from schema for Gemini API compatibility")
+        return cleaned_schema
+    
     def _parse_field_definitions(self, field_defs: str) -> Dict[str, Any]:
         schema = {
             "type": "object",
@@ -660,7 +709,9 @@ class GeminiJSONExtractor:
             if not field_type.endswith('?'):
                 schema["required"].append(field_name)
         
-        self._log(f"Generated schema with fields: {list(schema['properties'].keys())}")
+        # Clean the schema for Gemini API
+        schema = self._clean_schema_for_gemini(schema)
+        self._log(f"Generated and cleaned schema with fields: {list(schema['properties'].keys())}")
         return schema
 
     def _map_type(self, type_str: str) -> str:

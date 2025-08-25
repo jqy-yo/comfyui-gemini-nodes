@@ -3,6 +3,7 @@ import time
 import random
 import torch
 import traceback
+import json
 from google import genai
 from google.genai import types
 from typing import Optional, List, Dict, Any
@@ -32,14 +33,16 @@ class GeminiTextAPI:
             }
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("response",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("response", "api_request", "api_response")
     FUNCTION = "generate_text"
     CATEGORY = "🤖 Gemini"
 
     def __init__(self):
         """Initialize logging system"""
         self.log_messages = []
+        self.api_request = {}
+        self.api_response = {}
 
     def _log(self, message):
         """Global logging function: record to log list"""
@@ -54,6 +57,21 @@ class GeminiTextAPI:
         """Call Gemini API with retry logic using the updated generate_content method"""
         try:
             self._log(f"API call attempt #{retry_count + 1}")
+            
+            # Store the request details
+            self.api_request = {
+                "model": model,
+                "contents": contents,
+                "config": {
+                    "temperature": gen_config.temperature if hasattr(gen_config, 'temperature') else None,
+                    "max_output_tokens": gen_config.max_output_tokens if hasattr(gen_config, 'max_output_tokens') else None,
+                    "top_p": gen_config.top_p if hasattr(gen_config, 'top_p') else None,
+                    "top_k": gen_config.top_k if hasattr(gen_config, 'top_k') else None,
+                    "candidate_count": gen_config.candidate_count if hasattr(gen_config, 'candidate_count') else None,
+                    "system_instruction": gen_config.system_instruction if hasattr(gen_config, 'system_instruction') else None
+                }
+            }
+            
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
@@ -63,6 +81,31 @@ class GeminiTextAPI:
             # Check if response is valid
             if response:
                 self._log("Valid API response received")
+                
+                # Store the raw API response
+                self.api_response = {
+                    "text": response.text if hasattr(response, 'text') else None,
+                    "candidates": []
+                }
+                
+                if hasattr(response, 'candidates') and response.candidates:
+                    for candidate in response.candidates:
+                        candidate_data = {
+                            "finish_reason": str(candidate.finish_reason) if hasattr(candidate, 'finish_reason') else None,
+                            "content": None
+                        }
+                        if hasattr(candidate, 'content') and candidate.content:
+                            content_parts = []
+                            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                for part in candidate.content.parts:
+                                    if hasattr(part, 'text'):
+                                        content_parts.append({"text": part.text})
+                            candidate_data["content"] = {
+                                "role": candidate.content.role if hasattr(candidate.content, 'role') else None,
+                                "parts": content_parts
+                            }
+                        self.api_response["candidates"].append(candidate_data)
+                
                 # Log response details for debugging
                 self._log(f"Response type: {type(response)}")
                 if hasattr(response, 'text'):
@@ -94,15 +137,17 @@ class GeminiTextAPI:
     def generate_text(self, prompt, api_key, model, temperature, max_output_tokens, seed,
                       system_instructions="", top_p=0.95, top_k=64, api_version="auto"):
         """Generate text response from Gemini API using the new client structure"""
-        # Reset log messages
+        # Reset log messages and API data
         self.log_messages = []
+        self.api_request = {}
+        self.api_response = {}
 
         try:
             # Check if API key is provided
             if not api_key:
                 error_message = "Error: No API key provided. Please enter Google API key in the node."
                 self._log(error_message)
-                return (f"## ERROR: {error_message}\n\nPlease provide a valid Google API key.",)
+                return (f"## ERROR: {error_message}\n\nPlease provide a valid Google API key.", "{}", "{}")
 
             # Create client instance with API key
             # Note: The google-genai SDK automatically handles API version selection
@@ -148,7 +193,7 @@ class GeminiTextAPI:
             if response is None:
                 error_text = "Failed to get response from Gemini API after multiple attempts."
                 self._log(error_text)
-                return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+                return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
 
             # Extract and return the raw text from the response
             try:
@@ -195,31 +240,31 @@ class GeminiTextAPI:
                                 else:
                                     error_text = "Model returned empty response with no content"
                                 
-                                return (f"## API Error\n{error_text}\n\nTry:\n1. Rephrasing your prompt\n2. Using a different model\n3. Checking if the content violates safety guidelines\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+                                return (f"## API Error\n{error_text}\n\nTry:\n1. Rephrasing your prompt\n2. Using a different model\n3. Checking if the content violates safety guidelines\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
                         else:
                             self._log("Candidate has no content")
                             error_text = "Response candidate has no content"
-                            return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+                            return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
                     else:
                         self._log("No candidates in response")
                         error_text = "Response has no candidates"
-                        return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+                        return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
                 
                 # Check if we successfully got text
                 if result_text:
                     result_text = result_text.strip()
                     self._log(f"Successfully received response ({len(result_text)} characters)")
-                    return (result_text,)
+                    return (result_text, json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
                 else:
                     error_text = "Could not extract any text from response"
                     self._log(error_text)
-                    return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+                    return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
                 
             except Exception as e:
                 error_text = f"Error extracting text: {str(e)}"
                 self._log(error_text)
                 self._log(f"Full error: {traceback.format_exc()}")
-                return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+                return (f"## API Error\n{error_text}\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2), json.dumps(self.api_response, indent=2))
 
         except Exception as e:
             error_message = f"Error: {str(e)}"
@@ -227,4 +272,4 @@ class GeminiTextAPI:
             traceback.print_exc()
 
             # Return error message and debug log
-            return (f"## Error\n{error_message}\n\n## Debug Log\n" + "\n".join(self.log_messages),)
+            return (f"## Error\n{error_message}\n\n## Debug Log\n" + "\n".join(self.log_messages), json.dumps(self.api_request, indent=2) if self.api_request else "{}", json.dumps(self.api_response, indent=2) if self.api_response else "{}")

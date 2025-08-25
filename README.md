@@ -22,6 +22,7 @@ A comprehensive collection of custom nodes for integrating Google Gemini API wit
 - **Image Generation**: Multi-reference image generation with batch processing
 - **Video Analysis**: Intelligent video captioning and analysis
 - **JSON Processing**: Extract, parse, and manipulate JSON data
+- **API Debugging**: All processing nodes now output complete API request/response for debugging
 
 ## Installation
 
@@ -81,6 +82,8 @@ Generate text responses using any Gemini model with flexible model selection and
 
 **Output:**
 - `response` (STRING): Generated text response
+- `api_request` (STRING): Complete API request sent to Gemini (JSON format)
+- `api_response` (STRING): Complete API response from Gemini (JSON format)
 
 **Usage Examples:**
 
@@ -139,6 +142,8 @@ Generate responses in a specific JSON structure using JSON Schema validation.
 **Output:**
 - `structured_output` (STRING): Formatted JSON output
 - `raw_json` (STRING): Raw JSON response
+- `debug_request_sent` (STRING): Complete API request sent to Gemini (JSON format)
+- `debug_response_received` (STRING): Complete API response from Gemini (JSON format)
 
 **Usage Examples:**
 
@@ -526,6 +531,8 @@ Generate images with optional reference images using Gemini's image generation m
 **Output:**
 - `image` (IMAGE): Generated images batch
 - `API Respond` (STRING): API response information
+- `api_request` (STRING): Complete API request sent to Gemini (JSON format)
+- `api_response` (STRING): Complete API response from Gemini (JSON format)
 
 **Features:**
 - Automatic image padding to minimum 1024x1024 with white borders
@@ -613,6 +620,8 @@ Advanced multi-slot image generation system for batch processing multiple image/
 **Output:**
 - `images` (IMAGE): All generated images in a single batch
 - `API_responses` (STRING): Detailed API response information
+- `api_request` (STRING): Complete API requests sent to Gemini (JSON format)
+- `api_response` (STRING): Complete API responses from Gemini (JSON format)
 
 **Usage Examples:**
 
@@ -710,6 +719,9 @@ Generate intelligent captions and descriptions for videos using Gemini's multimo
 **Output:**
 - `caption` (STRING): Generated video description/caption
 - `sampled_frame` (IMAGE): Representative frame from the video
+- `raw_json` (STRING): Raw JSON response (for structured output mode)
+- `api_request` (STRING): Complete API request sent to Gemini (JSON format)
+- `api_response` (STRING): Complete API response from Gemini (JSON format)
 
 **Video Processing Details:**
 - Maximum file size: 30MB (automatically compressed if needed)
@@ -842,6 +854,18 @@ Output: Detailed sports commentary
 - Combine with structured output for data extraction
 
 ## Troubleshooting
+
+### API Debugging
+All processing nodes now include `api_request` and `api_response` outputs for debugging:
+- **api_request**: Complete request sent to Gemini API (JSON format)
+- **api_response**: Complete response from Gemini API (JSON format)
+
+Use these outputs to:
+- Debug API communication issues
+- Understand exact request format
+- Analyze response structure
+- Track token usage and costs
+- Identify rate limiting issues
 
 ### Common Issues
 

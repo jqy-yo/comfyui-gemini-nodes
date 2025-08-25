@@ -44,8 +44,8 @@ class GeminiImageEditor:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("image", "API Respond")
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("image", "API Respond", "api_request", "api_response")
     FUNCTION = "generate_image"
     CATEGORY = "🤖 Gemini"
 
@@ -53,6 +53,8 @@ class GeminiImageEditor:
         """Initialize logging system"""
         self.log_messages = []  # Global log message storage
         self.min_size = 1024  # Minimum size for both width and height
+        self.api_requests = []  # Store API requests for batch processing
+        self.api_responses = []  # Store API responses for batch processing
 
         # Check google-genai version
         try:
@@ -180,6 +182,24 @@ class GeminiImageEditor:
         """Call Gemini API with retry logic"""
         try:
             self._log(f"[Batch {batch_id}] API call attempt #{retry_count + 1}")
+            
+            # Store the request details
+            request_data = {
+                "model": model,
+                "contents": contents if isinstance(contents, str) else [str(c) if not hasattr(c, '_pb') else "PIL Image" for c in contents],
+                "config": {
+                    "temperature": gen_config.temperature if hasattr(gen_config, 'temperature') else None,
+                    "seed": gen_config.seed if hasattr(gen_config, 'seed') else None,
+                    "response_modalities": gen_config.response_modalities if hasattr(gen_config, 'response_modalities') else None
+                }
+            }
+            
+            # Store request for this batch
+            if hasattr(self, 'api_requests'):
+                while len(self.api_requests) <= batch_id:
+                    self.api_requests.append({})
+                self.api_requests[batch_id] = request_data
+            
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
@@ -244,28 +264,52 @@ class GeminiImageEditor:
         if response is None:
             self._log(f"[Batch {batch_id}] No valid response to process")
             error_msg = "API Failed to return an image"
+            # Store empty response for this batch
+            if hasattr(self, 'api_responses'):
+                while len(self.api_responses) <= batch_id:
+                    self.api_responses.append({})
+                self.api_responses[batch_id] = {"error": error_msg}
             return self._create_error_image(error_msg), error_msg
 
         response_text = ""
+        
+        # Store response data
+        response_data = {
+            "candidates": []
+        }
 
         # Check if response contains valid data
         if not hasattr(response, 'candidates') or not response.candidates:
             self._log(f"[Batch {batch_id}] No candidates in API response")
             error_msg = "API returned an empty response"
+            if hasattr(self, 'api_responses'):
+                while len(self.api_responses) <= batch_id:
+                    self.api_responses.append({})
+                self.api_responses[batch_id] = {"error": error_msg}
             return self._create_error_image(error_msg), error_msg
 
+        # Store candidate data in response
+        for candidate in response.candidates:
+            candidate_data = {
+                "finish_reason": str(candidate.finish_reason) if hasattr(candidate, 'finish_reason') else None,
+                "content": {"parts": []}
+            }
+            response_data["candidates"].append(candidate_data)
+        
         # Iterate through response parts
         for part in response.candidates[0].content.parts:
             # Check if it's a text part
             if hasattr(part, 'text') and part.text is not None:
                 text_content = part.text
                 response_text += text_content
+                response_data["candidates"][0]["content"]["parts"].append({"text": text_content})
                 self._log(
                     f"[Batch {batch_id}] API returned text: {text_content[:100]}..." if len(
                         text_content) > 100 else text_content)
 
             # Check if it's an image part
             elif hasattr(part, 'inline_data') and part.inline_data is not None:
+                response_data["candidates"][0]["content"]["parts"].append({"inline_data": {"mime_type": part.inline_data.mime_type if hasattr(part.inline_data, 'mime_type') else "image/png", "data": "<base64_image_data>"}})
                 self._log(f"[Batch {batch_id}] API returned image data")
                 try:
                     # Get image data
@@ -325,6 +369,11 @@ class GeminiImageEditor:
                     img_tensor = torch.from_numpy(img_array).unsqueeze(0)
 
                     self._log(f"[Batch {batch_id}] Image converted to tensor successfully, shape: {img_tensor.shape}")
+                    # Store successful response data
+                    if hasattr(self, 'api_responses'):
+                        while len(self.api_responses) <= batch_id:
+                            self.api_responses.append({})
+                        self.api_responses[batch_id] = response_data
                     return img_tensor, response_text
                 except Exception as e:
                     self._log(f"[Batch {batch_id}] Image processing error: {e}")
@@ -333,6 +382,11 @@ class GeminiImageEditor:
         # If we got here, no image was found
         self._log(f"[Batch {batch_id}] No image data found in API response")
         error_msg = "API Failed to return an image"
+        # Store response data even if no image was found
+        if hasattr(self, 'api_responses'):
+            while len(self.api_responses) <= batch_id:
+                self.api_responses.append({})
+            self.api_responses[batch_id] = response_data
         return self._create_error_image(error_msg), response_text if response_text else error_msg
 
     async def _generate_single_image_async(self, prompt, api_key, model, temperature, max_retries,
@@ -527,4 +581,4 @@ class GeminiImageEditor:
 
             # Combine logs and error info
             full_text = "## Processing Log\n" + "\n".join(self.log_messages) + "\n\n## Error\n" + error_message
-            return (batch_tensor, full_text)
+            return (batch_tensor, full_text, json.dumps(self.api_requests, indent=2) if self.api_requests else "{}", json.dumps(self.api_responses, indent=2) if self.api_responses else "{}")

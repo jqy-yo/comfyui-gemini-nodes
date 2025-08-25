@@ -47,8 +47,8 @@ class GeminiImageGenADV:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("images", "API_responses")
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("images", "API_responses", "api_request", "api_response")
     FUNCTION = "generate_images_advanced"
     CATEGORY = "🤖 Gemini"
     DESCRIPTION = """
@@ -59,6 +59,8 @@ Each pair triggers an asynchronous API call. Results are batched.
     def __init__(self):
         self.log_messages = []
         self.min_size = 1024 # Minimum size from Editor
+        self.api_requests = []  # Store API requests
+        self.api_responses = []  # Store API responses
         try:
             import importlib.metadata
             genai_version = importlib.metadata.version('google-genai')
@@ -160,6 +162,24 @@ Each pair triggers an asynchronous API call. Results are batched.
         try:
             self._log(f"[Call {call_id}] API call attempt #{retry_count + 1} to {model_name_full}{' (retrying indefinitely)' if retry_indefinitely else ''}")
             
+            # Store the request details
+            request_data = {
+                "model": model_name_full,
+                "contents": contents if isinstance(contents, str) else [str(c) if not hasattr(c, '_pb') else "PIL Image" for c in contents],
+                "config": {
+                    "temperature": gen_config_obj.temperature if hasattr(gen_config_obj, 'temperature') else None,
+                    "seed": gen_config_obj.seed if hasattr(gen_config_obj, 'seed') else None,
+                    "response_modalities": gen_config_obj.response_modalities if hasattr(gen_config_obj, 'response_modalities') else None
+                }
+            }
+            
+            # Store request for this call
+            call_idx = int(call_id) - 1 if call_id.isdigit() else 0
+            if hasattr(self, 'api_requests'):
+                while len(self.api_requests) <= call_idx:
+                    self.api_requests.append({})
+                self.api_requests[call_idx] = request_data
+            
             # Using client.models.generate_content like in GeminiImageEditor
             response = client_instance.models.generate_content(
                 model=model_name_full, # GeminiImageEditor passes the full model string here
@@ -216,27 +236,53 @@ Each pair triggers an asynchronous API call. Results are batched.
         if response is None: # Simplified check from Editor
             self._log(f"[Call {call_id}] No valid response to process.")
             error_msg = "API Error: No content in response"
+            # Store error response
+            call_idx = int(call_id) - 1 if call_id.isdigit() else 0
+            if hasattr(self, 'api_responses'):
+                while len(self.api_responses) <= call_idx:
+                    self.api_responses.append({})
+                self.api_responses[call_idx] = {"error": error_msg}
             return self._create_error_image(error_msg), error_msg
 
         response_text_parts = [] # Changed from response_text to response_text_parts to match ADV logic initially
         image_tensor = None
+        
+        # Store response data
+        response_data = {
+            "candidates": []
+        }
 
         if not hasattr(response, 'candidates') or not response.candidates: # Check from Editor
             self._log(f"[Call {call_id}] No candidates in API response")
             error_msg = "API returned an empty response"
+            call_idx = int(call_id) - 1 if call_id.isdigit() else 0
+            if hasattr(self, 'api_responses'):
+                while len(self.api_responses) <= call_idx:
+                    self.api_responses.append({})
+                self.api_responses[call_idx] = {"error": error_msg}
             return self._create_error_image(error_msg), error_msg
 
+        # Store candidate data in response
+        for candidate in response.candidates:
+            candidate_data = {
+                "finish_reason": str(candidate.finish_reason) if hasattr(candidate, 'finish_reason') else None,
+                "content": {"parts": []}
+            }
+            response_data["candidates"].append(candidate_data)
+        
         # Iterate through response parts (similar to Editor, but adapted for ADV's single image focus per call)
         for part in response.candidates[0].content.parts:
             if hasattr(part, 'text') and part.text is not None:
                 text_content = part.text
                 response_text_parts.append(text_content)
+                response_data["candidates"][0]["content"]["parts"].append({"text": text_content})
                 self._log(
                     f"[Call {call_id}] API returned text: {text_content[:100]}..." if len(
                         text_content) > 100 else text_content)
 
             elif hasattr(part, 'inline_data') and part.inline_data is not None:
                 self._log(f"[Call {call_id}] API returned image data")
+                response_data["candidates"][0]["content"]["parts"].append({"inline_data": {"mime_type": part.inline_data.mime_type if hasattr(part.inline_data, 'mime_type') else "image/png", "data": "<base64_image_data>"}})
                 try:
                     image_data = part.inline_data.data
                     
@@ -297,6 +343,14 @@ Each pair triggers an asynchronous API call. Results are batched.
                     traceback.print_exc()
         
         final_response_text = "\n".join(response_text_parts)
+        
+        # Store response data
+        call_idx = int(call_id) - 1 if call_id.isdigit() else 0
+        if hasattr(self, 'api_responses'):
+            while len(self.api_responses) <= call_idx:
+                self.api_responses.append({})
+            self.api_responses[call_idx] = response_data
+        
         if image_tensor is None:
             self._log(f"[Call {call_id}] No image found in API response parts.")
             error_msg = "API Error: No image data in response" # More specific than Editor's default
@@ -361,6 +415,8 @@ Each pair triggers an asynchronous API call. Results are batched.
 
     def generate_images_advanced(self, inputcount, api_key, model, temperature, max_retries, prompt_1, image_1=None, seed=0, retry_indefinitely=False, api_version="auto", **kwargs):
         self.log_messages = []
+        self.api_requests = []
+        self.api_responses = []
         if not api_key:
             error_msg = "API key not provided."
             self._log(error_msg)
@@ -368,7 +424,7 @@ Each pair triggers an asynchronous API call. Results are batched.
             # API key error should return 'inputcount' error images if we can determine it,
             # otherwise, a single error image is a reasonable fallback.
             # Since each slot is one API call now, inputcount is the number of expected results.
-            return ([error_img_instance] * inputcount, error_msg)
+            return ([error_img_instance] * inputcount, error_msg, "{}", "{}")
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -398,7 +454,7 @@ Each pair triggers an asynchronous API call. Results are batched.
 
         if not tasks:
             self._log("No tasks were created. This might indicate an issue with inputcount or logic.")
-            return ([self._create_error_image("No tasks generated")], "No tasks generated")
+            return ([self._create_error_image("No tasks generated")], "No tasks generated", "{}", "{}")
 
         results_with_id = []
         try:
@@ -421,4 +477,4 @@ Each pair triggers an asynchronous API call. Results are batched.
         
         final_log_output = "Processing Logs:\n" + "\n".join(self.log_messages) + "\n\n" + combined_responses
 
-        return (batched_images, final_log_output)
+        return (batched_images, final_log_output, json.dumps(self.api_requests, indent=2) if self.api_requests else "{}", json.dumps(self.api_responses, indent=2) if self.api_responses else "{}")
