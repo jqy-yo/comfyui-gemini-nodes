@@ -7,6 +7,7 @@ from .nodes.GeminiImageEditor import GeminiImageEditor
 from .nodes.GeminiTextAPI import GeminiTextAPI
 from .nodes.GeminiImageGenADV import GeminiImageGenADV
 from .nodes.GeminiVideoCaptioner import GeminiVideoCaptioner
+from .nodes.GeminiVideoGenerator import GeminiVideoGenerator
 from .nodes.GeminiStructuredOutput import GeminiStructuredOutput, GeminiJSONExtractor
 from .nodes.GeminiFieldExtractor import GeminiFieldExtractor, GeminiJSONParser
 
@@ -15,6 +16,7 @@ NODE_CLASS_MAPPINGS = {
     "GeminiTextAPI": GeminiTextAPI,
     "GeminiImageGenADV": GeminiImageGenADV,
     "GeminiVideoCaptioner": GeminiVideoCaptioner,
+    "GeminiVideoGenerator": GeminiVideoGenerator,
     "GeminiStructuredOutput": GeminiStructuredOutput,
     "GeminiJSONExtractor": GeminiJSONExtractor,
     "GeminiFieldExtractor": GeminiFieldExtractor,
@@ -26,6 +28,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GeminiTextAPI": "Gemini Text API",
     "GeminiImageGenADV": "Gemini Image Gen Advanced",
     "GeminiVideoCaptioner": "Gemini Video Captioner",
+    "GeminiVideoGenerator": "Gemini Video Generator (Veo)",
     "GeminiStructuredOutput": "Gemini Structured Output",
     "GeminiJSONExtractor": "Gemini JSON Extractor",
     "GeminiFieldExtractor": "Gemini Field Extractor",

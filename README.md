@@ -685,6 +685,105 @@ Output: 20 marketing-ready images
 - Consider memory limits when setting high inputcount
 - Batch related images together for workflow efficiency
 
+### 🎥 Gemini Video Generator (Veo)
+Generate high-quality videos using Google's Veo models with text-to-video and image-to-video capabilities.
+
+**Input Parameters:**
+- `prompt` (STRING): Detailed description of the video to generate
+  - Default: "A cinematic drone shot of a red convertible driving along a coastal road at sunset"
+- `api_key` (STRING): Your Google API key (requires Veo access)
+- `model` (ENUM): Video generation model
+  - `veo-3.0-generate-preview`: Highest quality Veo 3 model
+  - `veo-3.0-fast-generate-preview`: Faster Veo 3 variant
+  - `veo-2.0-generate-001`: Veo 2 model
+- `aspect_ratio` (ENUM): Video dimensions
+  - Options: "16:9", "9:16", "1:1", "4:3", "3:4"
+  - Default: "16:9"
+- `person_generation` (ENUM): Control human representation
+  - `default`: Standard behavior
+  - `allow`: Explicitly allow person generation
+  - `dont_allow`: Prevent person generation
+- `max_wait_minutes` (FLOAT, 1.0-30.0, default: 5.0): Maximum time to wait for generation
+- `poll_interval_seconds` (INT, 2-30, default: 5): How often to check generation status
+- `negative_prompt` (STRING, optional): Elements to exclude from the video
+- `initial_image` (IMAGE, optional): Starting image for video generation
+- `save_path` (STRING, optional): Path to save the generated video
+
+**Output:**
+- `video_path` (STRING): Path to the generated video file
+- `preview_frame` (IMAGE): A preview frame extracted from the video
+- `generation_info` (STRING): Details about the generated video
+- `api_request` (STRING): Complete API request sent to Gemini (JSON format)
+- `api_response` (STRING): Complete API response from Gemini (JSON format)
+
+**Features:**
+- Text-to-video generation with detailed prompts
+- Image-to-video generation from initial frames
+- Multiple aspect ratios for different platforms
+- Negative prompting to exclude unwanted elements
+- Asynchronous generation with progress tracking
+- Automatic video download and storage
+- Preview frame extraction for ComfyUI display
+- SynthID watermarking (automatic)
+
+**Video Specifications:**
+- Duration: 8 seconds
+- Resolution: 720p (1280x720 or equivalent based on aspect ratio)
+- Format: MP4 with native audio
+- Storage: Videos stored for 2 days on Google servers
+- Watermark: Includes SynthID for AI-generated content identification
+
+**Usage Examples:**
+
+1. **Cinematic Scene Generation:**
+```
+Prompt: "A sweeping aerial view of a misty mountain range at dawn, clouds rolling through valleys, golden sunlight breaking through"
+Model: veo-3.0-generate-preview
+Aspect Ratio: 16:9
+Output: 8-second cinematic landscape video
+```
+
+2. **Product Showcase:**
+```
+Prompt: "360-degree rotation of a luxury watch on a black velvet turntable, dramatic lighting highlighting the metallic finish"
+Negative Prompt: "blurry, low quality, distorted"
+Model: veo-3.0-generate-preview
+Aspect Ratio: 1:1
+Output: Professional product video
+```
+
+3. **Image-to-Video Animation:**
+```
+Prompt: "Bring this portrait to life with subtle movements, blinking, and breathing"
+Initial Image: [Portrait photo]
+Model: veo-3.0-fast-generate-preview
+Person Generation: allow
+Output: Animated portrait video
+```
+
+4. **Social Media Content:**
+```
+Prompt: "Time-lapse of a busy coffee shop, people coming and going, steam rising from cups, warm cozy atmosphere"
+Model: veo-2.0-generate-001
+Aspect Ratio: 9:16
+Output: Vertical video for social media
+```
+
+**Best Practices:**
+- Use detailed, specific prompts for better results
+- Include style keywords (cinematic, documentary, anime, etc.)
+- Use negative prompts to avoid unwanted elements
+- Consider aspect ratio based on target platform
+- Allow sufficient generation time (typically 2-5 minutes)
+- Save videos locally as they're only stored for 2 days
+
+**Important Notes:**
+- Requires API access to Veo models (may need special permissions)
+- Generation is asynchronous and may take several minutes
+- Videos include SynthID watermark for transparency
+- Person generation may be restricted in certain regions
+- Maximum prompt length: 1,024 tokens
+
 ### 🎬 Gemini Video Captioner
 Generate intelligent captions and descriptions for videos using Gemini's multimodal capabilities.
 
