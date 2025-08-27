@@ -389,10 +389,14 @@ class GeminiImageEditor:
             self.api_responses[batch_id] = response_data
         return self._create_error_image(error_msg), response_text if response_text else error_msg
 
-    async def _generate_single_image_async(self, prompt, api_key, model, temperature, max_retries,
-                                           batch_id, seed, reference_images, api_version="auto"):
-        """Generate a single image asynchronously for batch processing"""
+    def _generate_single_image_sync(self, prompt, api_key, model, temperature, max_retries,
+                                    batch_id, seed, reference_images, api_version=None):
+        """Generate a single image synchronously for batch processing"""
         try:
+            # Handle None or invalid api_version
+            if api_version is None or api_version not in ["auto", "v1", "v1beta", "v1alpha"]:
+                api_version = "auto"
+            
             # Create client instance - each batch gets its own client
             # Note: The google-genai SDK automatically handles API version selection
             # The api_version parameter is provided for future compatibility
@@ -424,24 +428,18 @@ class GeminiImageEditor:
                 if img is not None:
                     content_parts.append(img)
 
-            # Make API call with synchronous method (will run in thread pool)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._call_gemini_api(
-                    client=client,
-                    model=model,
-                    contents=content_parts,
-                    gen_config=gen_config,
-                    max_retries=max_retries,
-                    batch_id=batch_id
-                )
+            # Make API call synchronously
+            response = self._call_gemini_api(
+                client=client,
+                model=model,
+                contents=content_parts,
+                gen_config=gen_config,
+                max_retries=max_retries,
+                batch_id=batch_id
             )
 
             # Process the response and return the image tensor and text
-            img_tensor, response_text = await loop.run_in_executor(
-                None, lambda: self._process_api_response(response, batch_id)
-            )
+            img_tensor, response_text = self._process_api_response(response, batch_id)
 
             # If processing failed, return the error image
             if img_tensor is None:
@@ -456,11 +454,21 @@ class GeminiImageEditor:
             return self._create_error_image(error_msg), error_msg, batch_id
 
     def generate_image(self, prompt, api_key, model, temperature, max_retries=3, batch_size=1,
-                       seed=66666666, image1=None, image2=None, image3=None, image4=None, api_version="auto"):
+                       seed=66666666, image1=None, image2=None, image3=None, image4=None, api_version=None):
         """Generate batch of images with parallel API calls"""
         # Reset log messages
         self.log_messages = []
         all_response_text = ""
+        
+        # Handle None or invalid api_version
+        if api_version is None or api_version not in ["auto", "v1", "v1beta", "v1alpha"]:
+            api_version = "auto"
+        
+        # Handle seed that might be None or invalid
+        try:
+            seed = int(seed) if seed is not None else 66666666
+        except (ValueError, TypeError):
+            seed = 66666666  # Use default seed
 
         try:
             # Check if API key is provided
@@ -474,9 +482,9 @@ class GeminiImageEditor:
                 if batch_size > 1:
                     error_imgs = [error_img] * batch_size
                     batch_tensor = torch.cat(error_imgs, dim=0)
-                    return (batch_tensor, full_text)
+                    return (batch_tensor, full_text, "{}", "{}")
                 else:
-                    return (error_img, full_text)
+                    return (error_img, full_text, "{}", "{}")
 
             self._log(f"Starting batch generation of {batch_size} images")
 
@@ -491,17 +499,21 @@ class GeminiImageEditor:
                         reference_pil_images.append(pil_img)
                         self._log(f"Added reference image {i + 1} to batch processing")
 
-            # Setup async tasks for each batch item
-            async def run_batch():
-                tasks = []
-
-                # Create tasks for each batch item
+            # Use ThreadPoolExecutor for parallel batch processing
+            import concurrent.futures
+            results = []
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(batch_size, 10)) as executor:
+                futures = []
+                
+                # Submit tasks for each batch item
                 for i in range(batch_size):
                     # If seed is specified (non-zero), increment it for each batch item
                     # Otherwise each batch will use a random seed
                     batch_seed = seed + i if seed != 0 else 0
 
-                    task = self._generate_single_image_async(
+                    future = executor.submit(
+                        self._generate_single_image_sync,
                         prompt=prompt,
                         api_key=api_key,
                         model=model,
@@ -512,37 +524,26 @@ class GeminiImageEditor:
                         reference_images=reference_pil_images,
                         api_version=api_version
                     )
-                    tasks.append(task)
+                    futures.append(future)
 
-                # Run all tasks concurrently
-                return await asyncio.gather(*tasks)
-
-            # Run the async batch processing
-            # Always create a new event loop for this execution context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            results = None # Initialize results
-            try:
-                # Run the batch processing
-                results = loop.run_until_complete(run_batch())
-            except Exception as e:
-                self._log(f"Error in async processing: {str(e)}")
-                traceback.print_exc()
-                # Create batch of error images
-                error_imgs = [self._create_error_image(f"Async processing error: {str(e)}")] * batch_size
-                batch_tensor = torch.cat(error_imgs, dim=0)
-                return (batch_tensor, f"Async processing error: {str(e)}")
-            finally:
-                # Ensure the loop is closed
-                if loop and not loop.is_closed():
-                    loop.close()
+                self._log(f"Executing {len(futures)} batch items in parallel using thread pool")
+                
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        self._log(f"Batch item failed with error: {str(e)}")
+                        error_img = self._create_error_image(f"Batch error: {str(e)}")
+                        results.append((error_img, str(e), 0))
             
-            # Process results (ensure results is not None if an error occurred before assignment)
-            if results is None:
-                self._log("Async processing did not yield results, possibly due to an earlier error before gather.")
-                error_imgs = [self._create_error_image("Async processing failed to produce results")] * batch_size
+            # Process results (ensure results is not None)
+            if not results:
+                self._log("Batch processing did not yield results")
+                error_imgs = [self._create_error_image("Batch processing failed")] * batch_size
                 batch_tensor = torch.cat(error_imgs, dim=0)
-                return (batch_tensor, "Async processing failed to produce results")
+                return (batch_tensor, "Batch processing failed", "{}", "{}")
 
             # Process results
             all_tensors = []
@@ -568,7 +569,7 @@ class GeminiImageEditor:
             all_response_text = "## Batch Processing Results\n" + "\n".join(self.log_messages) + "\n\n" + "\n\n".join(
                 batch_texts)
 
-            return (batch_tensor, all_response_text)
+            return (batch_tensor, all_response_text, json.dumps(self.api_requests, indent=2) if self.api_requests else "{}", json.dumps(self.api_responses, indent=2) if self.api_responses else "{}")
 
         except Exception as e:
             error_message = f"Error during batch processing: {str(e)}"

@@ -359,8 +359,13 @@ Each pair triggers an asynchronous API call. Results are batched.
         
         return image_tensor, final_response_text
 
-    async def _generate_single_image_async(self, api_key, model_name_full, prompt_text, input_pil_images: Optional[List[Image.Image]], temperature, max_retries, retry_indefinitely, seed_val, call_id, api_version="auto"):
+    def _generate_single_image_sync(self, api_key, model_name_full, prompt_text, input_pil_images: Optional[List[Image.Image]], temperature, max_retries, retry_indefinitely, seed_val, call_id, api_version=None):
+        """Synchronous version of image generation"""
         try:
+            # Handle None or invalid api_version
+            if api_version is None or api_version not in ["auto", "v1", "v1beta", "v1alpha"]:
+                api_version = "auto"
+            
             # Note: The google-genai SDK automatically handles API version selection
             # The api_version parameter is provided for future compatibility
             if api_version != "auto":
@@ -399,24 +404,32 @@ Each pair triggers an asynchronous API call. Results are batched.
                     if pil_img: # Ensure the image itself is not None
                         contents.append(pil_img)
             
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._call_gemini_api(client_instance, model_name_full, contents, gen_config_obj, retry_indefinitely, 0, max_retries, call_id)
-            )
+            # Call API synchronously
+            response = self._call_gemini_api(client_instance, model_name_full, contents, gen_config_obj, retry_indefinitely, 0, max_retries, call_id)
             
             img_tensor, response_text = self._process_api_response(response, call_id)
             return img_tensor, response_text, call_id # Return call_id to map results
 
         except Exception as e:
-            self._log(f"[Call {call_id}] Error in async generation: {str(e)}")
+            self._log(f"[Call {call_id}] Error in generation: {str(e)}")
             error_msg = f"Call {call_id} Error: {str(e)}"
             return self._create_error_image(error_msg), error_msg, call_id
 
-    def generate_images_advanced(self, inputcount, api_key, model, temperature, max_retries, prompt_1, image_1=None, seed=0, retry_indefinitely=False, api_version="auto", **kwargs):
+    def generate_images_advanced(self, inputcount, api_key, model, temperature, max_retries, prompt_1, image_1=None, seed=0, retry_indefinitely=False, api_version=None, **kwargs):
         self.log_messages = []
         self.api_requests = []
         self.api_responses = []
+        
+        # Handle None or invalid api_version
+        if api_version is None or api_version not in ["auto", "v1", "v1beta", "v1alpha"]:
+            api_version = "auto"
+        
+        # Handle seed that might be a string like "randomize" or None
+        try:
+            seed = int(seed) if seed is not None else 0
+        except (ValueError, TypeError):
+            seed = 0  # Use 0 for random seed
+            
         if not api_key:
             error_msg = "API key not provided."
             self._log(error_msg)
@@ -426,42 +439,51 @@ Each pair triggers an asynchronous API call. Results are batched.
             # Since each slot is one API call now, inputcount is the number of expected results.
             return ([error_img_instance] * inputcount, error_msg, "{}", "{}")
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        tasks = []
-        pbar = ProgressBar(inputcount) # Initialize progress bar
-
-        for slot_idx in range(1, inputcount + 1):
-            current_prompt = prompt_1 if slot_idx == 1 else kwargs.get(f"prompt_{slot_idx}", f"Default prompt for image {slot_idx}")
-            
-            current_image_tensor_for_slot = None
-            if slot_idx == 1:
-                current_image_tensor_for_slot = image_1
-            else:
-                current_image_tensor_for_slot = kwargs.get(f"image_{slot_idx}")
-            
-            pil_images_for_this_slot = self._process_tensor_to_pil_list(current_image_tensor_for_slot, f"InputSlot{slot_idx}")
-            
-            current_task_seed = seed + (slot_idx - 1) if seed != 0 else 0
-            task_call_id = str(slot_idx)
-
-            tasks.append(self._generate_single_image_async(
-                api_key, model, current_prompt, pil_images_for_this_slot,
-                temperature, max_retries, retry_indefinitely, current_task_seed, task_call_id, api_version
-            ))
-            pbar.update_absolute(slot_idx) # Update progress bar after task is added
-
-        if not tasks:
-            self._log("No tasks were created. This might indicate an issue with inputcount or logic.")
-            return ([self._create_error_image("No tasks generated")], "No tasks generated", "{}", "{}")
-
+        # Use ThreadPoolExecutor for parallel execution
+        import concurrent.futures
         results_with_id = []
-        try:
-            results_with_id = loop.run_until_complete(asyncio.gather(*tasks))
-        finally:
-            if loop and not loop.is_closed():
-                loop.close()
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(inputcount, 10)) as executor:
+            futures = []
+            pbar = ProgressBar(inputcount) # Initialize progress bar
+
+            for slot_idx in range(1, inputcount + 1):
+                current_prompt = prompt_1 if slot_idx == 1 else kwargs.get(f"prompt_{slot_idx}", f"Default prompt for image {slot_idx}")
+                
+                current_image_tensor_for_slot = None
+                if slot_idx == 1:
+                    current_image_tensor_for_slot = image_1
+                else:
+                    current_image_tensor_for_slot = kwargs.get(f"image_{slot_idx}")
+                
+                pil_images_for_this_slot = self._process_tensor_to_pil_list(current_image_tensor_for_slot, f"InputSlot{slot_idx}")
+                
+                current_task_seed = seed + (slot_idx - 1) if seed != 0 else 0
+                task_call_id = str(slot_idx)
+
+                # Submit synchronous tasks to thread pool
+                future = executor.submit(
+                    self._generate_single_image_sync,
+                    api_key, model, current_prompt, pil_images_for_this_slot,
+                    temperature, max_retries, retry_indefinitely, current_task_seed, task_call_id, api_version
+                )
+                futures.append(future)
+                pbar.update_absolute(slot_idx) # Update progress bar after task is added
+
+            if not futures:
+                self._log("No tasks were created. This might indicate an issue with inputcount or logic.")
+                return ([self._create_error_image("No tasks generated")], "No tasks generated", "{}", "{}")
+
+            # Wait for all futures to complete
+            self._log(f"Executing {len(futures)} tasks in parallel using thread pool")
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    results_with_id.append(result)
+                except Exception as e:
+                    self._log(f"Task failed with error: {str(e)}")
+                    error_img = self._create_error_image(f"Task error: {str(e)}")
+                    results_with_id.append((error_img, str(e), "0"))
         
         results_with_id.sort(key=lambda x: int(x[2]))
         
