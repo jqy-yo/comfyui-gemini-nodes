@@ -4,6 +4,27 @@
 
 一个用于将 Google Gemini API 集成到 ComfyUI 的自定义节点集合，提供强大的 AI 功能，包括文本生成、结构化输出、图像生成、视频分析和 JSON 处理。
 
+## 🚀 可用节点
+
+### 核心节点
+- **Gemini Text API** - 支持灵活模型选择的高级文本生成
+- **Gemini Structured Output** - 使用模式验证生成 JSON 响应
+- **Gemini JSON Extractor** - 从文本中提取特定信息为 JSON 格式
+- **Gemini Field Extractor** - 使用路径表示法从 JSON 中提取字段
+- **Gemini JSON Parser** - 解析、验证和操作 JSON 数据
+
+### 图像生成
+- **Gemini Image Editor** - 使用可选参考图像生成图像
+- **Gemini Image Gen Advanced** - 多槽批量图像生成系统
+
+### 视频处理
+- **Gemini Video Generator (Veo)** - 使用 Google Veo 模型生成视频
+- **Gemini Video Captioner** - 为视频生成智能字幕
+
+### 非官方 API 支持
+- **Unofficial API Call** - 调用支持 Claude、GPT 等模型的非官方 API
+- **Unofficial Stream API Call** - 从非官方 API 流式获取实时输出响应
+
 ## 📋 目录
 - [功能特性](#功能特性)
 - [安装](#安装)

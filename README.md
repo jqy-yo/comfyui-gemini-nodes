@@ -4,6 +4,27 @@
 
 A comprehensive collection of custom nodes for integrating Google Gemini API with ComfyUI, providing powerful AI capabilities for text generation, structured output, image generation, and video analysis.
 
+## 🚀 Available Nodes
+
+### Core Nodes
+- **Gemini Text API** - Advanced text generation with flexible model selection
+- **Gemini Structured Output** - Generate JSON responses with schema validation
+- **Gemini JSON Extractor** - Extract specific information from text into JSON format
+- **Gemini Field Extractor** - Extract fields from JSON using path notation
+- **Gemini JSON Parser** - Parse, validate, and manipulate JSON data
+
+### Image Generation
+- **Gemini Image Editor** - Generate images with optional reference images
+- **Gemini Image Gen Advanced** - Multi-slot batch image generation system
+
+### Video Processing
+- **Gemini Video Generator (Veo)** - Generate videos using Google's Veo models
+- **Gemini Video Captioner** - Generate intelligent captions for videos
+
+### Unofficial API Support
+- **Unofficial API Call** - Call unofficial APIs supporting Claude, GPT, and other models
+- **Unofficial Stream API Call** - Stream responses from unofficial APIs with real-time output
+
 ## 📋 Table of Contents
 - [Features](#features)
 - [Installation](#installation)
