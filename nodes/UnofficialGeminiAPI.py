@@ -29,6 +29,7 @@ class UnofficialGeminiAPI:
                     "multiline": False,
                     "placeholder": "API base URL"
                 }),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0x7fffffff}),
             },
             "optional": {
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
@@ -137,7 +138,7 @@ class UnofficialGeminiAPI:
         img_tensor = torch.from_numpy(img_array).unsqueeze(0)
         return img_tensor
 
-    def call_unofficial_api(self, prompt, api_key, model, temperature, max_tokens, base_url,
+    def call_unofficial_api(self, prompt, api_key, model, temperature, max_tokens, base_url, seed,
                            system_prompt="You are a helpful assistant.", 
                            image=None, top_p=0.95, 
                            frequency_penalty=0.0, presence_penalty=0.0):
@@ -194,8 +195,12 @@ class UnofficialGeminiAPI:
                 "max_tokens": max_tokens,
                 "top_p": top_p,
                 "frequency_penalty": frequency_penalty,
-                "presence_penalty": presence_penalty
+                "presence_penalty": presence_penalty,
+                "seed": seed if seed > 0 else None
             }
+            
+            # Remove None values from payload
+            payload = {k: v for k, v in payload.items() if v is not None}
 
             self.api_request = payload
             self._log(f"Sending request to {base_url}/chat/completions")
@@ -318,6 +323,7 @@ class UnofficialGeminiStreamAPI:
                     "placeholder": "API base URL"
                 }),
                 "stream": ("BOOLEAN", {"default": True}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0x7fffffff}),
             },
             "optional": {
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
@@ -426,7 +432,7 @@ class UnofficialGeminiStreamAPI:
         return img_tensor
 
     def call_unofficial_stream_api(self, prompt, api_key, model, temperature, max_tokens, 
-                                  base_url, stream=True,
+                                  base_url, stream, seed,
                                   system_prompt="You are a helpful assistant.", 
                                   image=None, top_p=0.95):
         
@@ -482,8 +488,12 @@ class UnofficialGeminiStreamAPI:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "top_p": top_p,
-                "stream": stream
+                "stream": stream,
+                "seed": seed if seed > 0 else None
             }
+            
+            # Remove None values from payload
+            payload = {k: v for k, v in payload.items() if v is not None}
 
             self.api_request = payload
             self._log(f"Sending {'stream' if stream else 'non-stream'} request to {base_url}/chat/completions")
