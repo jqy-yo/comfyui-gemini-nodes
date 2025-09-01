@@ -11,6 +11,7 @@ from .nodes.GeminiVideoGenerator import GeminiVideoGenerator
 from .nodes.GeminiStructuredOutput import GeminiStructuredOutput, GeminiJSONExtractor
 from .nodes.GeminiFieldExtractor import GeminiFieldExtractor, GeminiJSONParser
 from .nodes.UnofficialGeminiAPI import UnofficialGeminiAPI, UnofficialGeminiStreamAPI
+from .nodes.GeminiImageProcessor import GeminiImageProcessor, GeminiImageBatchProcessor
 
 NODE_CLASS_MAPPINGS = {
     "GeminiImageEditor": GeminiImageEditor,
@@ -24,6 +25,8 @@ NODE_CLASS_MAPPINGS = {
     "GeminiJSONParser": GeminiJSONParser,
     "UnofficialGeminiAPI": UnofficialGeminiAPI,
     "UnofficialGeminiStreamAPI": UnofficialGeminiStreamAPI,
+    "GeminiImageProcessor": GeminiImageProcessor,
+    "GeminiImageBatchProcessor": GeminiImageBatchProcessor,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -38,6 +41,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GeminiJSONParser": "Gemini JSON Parser",
     "UnofficialGeminiAPI": "Unofficial API Call",
     "UnofficialGeminiStreamAPI": "Unofficial Stream API Call",
+    "GeminiImageProcessor": "Gemini Image Processor",
+    "GeminiImageBatchProcessor": "Gemini Image Batch Processor",
 }
 
 # ASCII Art

@@ -247,23 +247,59 @@ class GeminiVideoCaptioner:
             sample_frame_tensor = image[middle_idx].unsqueeze(0) if image.shape[0] > 0 else None
             raw_json = ""  # Initialize raw_json
 
-            # If only one frame is provided and it's a newer model, send as JPEG directly
-            if len(frames) == 1 and model in ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"]:
-                print(f"[GeminiVideoCaptioner] Single frame input for {model}, using direct frame processing (JPEG).")
-                caption, raw_json = self.get_caption_with_frames(
-                    api_key,
-                    frames,  # This will be a list with one frame
-                    prompt,
-                    model,
-                    temperature,
-                    max_output_tokens,
-                    top_p,
-                    top_k,
-                    seed,
-                    api_version,
-                    use_structured_output,
-                    output_schema
-                )
+            # If only one frame is provided, always send as JPEG directly (more efficient)
+            if len(frames) == 1:
+                print(f"[GeminiVideoCaptioner] Single frame input detected for {model}")
+                print(f"[GeminiVideoCaptioner] Using direct JPEG processing (more efficient for single images)")
+                
+                # Get image dimensions for debugging
+                if len(frames) > 0:
+                    h, w = frames[0].shape[:2] if len(frames[0].shape) >= 2 else (0, 0)
+                    print(f"[GeminiVideoCaptioner] Image dimensions: {w}x{h}")
+                
+                try:
+                    result = self.get_caption_with_frames(
+                        api_key,
+                        frames,  # This will be a list with one frame
+                        prompt,
+                        model,
+                        temperature,
+                        max_output_tokens,
+                        top_p,
+                        top_k,
+                        seed,
+                        api_version,
+                        use_structured_output,
+                        output_schema
+                    )
+                    
+                    # Handle different return formats
+                    if isinstance(result, tuple):
+                        if len(result) == 4:
+                            caption, raw_json, api_request, api_response = result
+                        elif len(result) == 3:
+                            caption, api_request, api_response = result
+                            raw_json = ""
+                        else:
+                            caption = result[0] if len(result) > 0 else "Error"
+                            raw_json = result[1] if len(result) > 1 else ""
+                    else:
+                        caption = str(result)
+                        raw_json = ""
+                        
+                except Exception as e:
+                    error_msg = str(e)
+                    if "500 INTERNAL" in error_msg:
+                        caption = f"Error: Image processing failed with 500 error. Model '{model}' may have issues with this image."
+                        print("[GeminiVideoCaptioner] ⚠️ Tips for resolving 500 error with single image:")
+                        print(f"  1. Current model: {model}")
+                        print("  2. Try using gemini-1.5-flash instead of experimental models")
+                        print("  3. Check image size - very large images (>10MB) may cause issues")
+                        print("  4. Ensure image format is standard (JPEG, PNG)")
+                        print("  5. Some models may have temporary issues - try again later")
+                    else:
+                        caption = f"Error processing single image: {error_msg}"
+                    raw_json = ""
             else:
                 # Original logic: try to create WebM, then send video file or fallback to frames
                 print(f"[GeminiVideoCaptioner] Creating WebM video from {len(frames)} frames...")
@@ -917,6 +953,19 @@ class GeminiVideoCaptioner:
     def _send_api_request(self, client, model, contents, config, use_structured=False, retry_count=0, max_retries=3):
         """Helper method to send API request using google-genai SDK"""
         try:
+            # Debug: Log request details
+            print(f"[DEBUG] Model: {model}")
+            print(f"[DEBUG] Content parts count: {len(contents) if isinstance(contents, list) else 1}")
+            if isinstance(contents, list):
+                for i, part in enumerate(contents[:3]):  # Log first 3 parts
+                    if isinstance(part, dict):
+                        if 'text' in part:
+                            print(f"[DEBUG] Part {i}: Text - {part['text'][:100]}...")
+                        elif 'inline_data' in part:
+                            print(f"[DEBUG] Part {i}: Image/Video - {part['inline_data'].get('mime_type', 'unknown')}")
+            print(f"[DEBUG] Temperature: {config.temperature if hasattr(config, 'temperature') else 'N/A'}")
+            print(f"[DEBUG] Max tokens: {config.max_output_tokens if hasattr(config, 'max_output_tokens') else 'N/A'}")
+            print(f"[DEBUG] Structured output: {use_structured}")
             # Debug logging for request
             print(f"[DEBUG] Sending request using google-genai SDK")
             print(f"[DEBUG] Model: {model}")
@@ -1060,9 +1109,51 @@ class GeminiVideoCaptioner:
         except Exception as e:
             error_msg = f"API call error: {str(e)}"
             print(f"[GeminiVideoCaptioner] {error_msg}")
+            
+            # Special handling for 500 INTERNAL errors
+            if "500 INTERNAL" in str(e) or "Internal error encountered" in str(e):
+                print("[GeminiVideoCaptioner] ⚠️ Gemini API returned 500 Internal Server Error")
+                print(f"[GeminiVideoCaptioner] Model being used: {model}")
+                
+                # Special handling for specific models
+                if "gemini-2.5-flash-lite" in model:
+                    print("[GeminiVideoCaptioner] ⚠️ KNOWN ISSUE: gemini-2.5-flash-lite has limited capabilities")
+                    print("[GeminiVideoCaptioner] This model may not support:")
+                    print("  - Video processing (only images)")
+                    print("  - Large content payloads")
+                    print("  - Certain structured output formats")
+                    print("[GeminiVideoCaptioner] RECOMMENDED ALTERNATIVES:")
+                    print("  1. Use gemini-1.5-flash for general purpose")
+                    print("  2. Use gemini-2.5-flash for better performance")
+                    print("  3. Use gemini-2.0-flash for video processing")
+                elif "exp" in model:
+                    print("[GeminiVideoCaptioner] ⚠️ Experimental model detected")
+                    print("[GeminiVideoCaptioner] Experimental models may be unstable")
+                    print("[GeminiVideoCaptioner] Try using stable versions instead")
+                else:
+                    print("[GeminiVideoCaptioner] Possible causes:")
+                    print("  1. The model might not support the requested operation")
+                    print("  2. Content type (video/image) not supported by this model")
+                    print("  3. Request payload too large for this model")
+                    print("  4. Temporary server issues on Google's side")
+                
+                # Don't retry 500 errors as they're usually not transient
+                error_detail = f"Error: Gemini API Internal Server Error (500) with model '{model}'."
+                
+                if "gemini-2.5-flash-lite" in model:
+                    error_detail += " This lite model has limited capabilities. Try using gemini-1.5-flash or gemini-2.5-flash instead."
+                elif "exp" in model:
+                    error_detail += " Experimental models may be unstable. Try using stable versions."
+                else:
+                    error_detail += " The model might not support this operation or content type."
+                
+                if use_structured:
+                    return (error_detail, "", api_request, {})
+                return (error_detail, api_request, {})
+            
             traceback.print_exc()  # Print full stack trace for debugging
             
-            # Retry on error
+            # Retry on other errors
             if retry_count < max_retries - 1:
                 wait_time = 2 * (retry_count + 1)  # Progressive backoff
                 print(f"[GeminiVideoCaptioner] Retrying in {wait_time} seconds... (Attempt {retry_count + 1}/{max_retries})")

@@ -243,9 +243,22 @@ class GeminiFieldExtractor:
         
         self.last_error = None
         
+        # Handle empty input
+        if not json_input or json_input.strip() == "":
+            print(f"[GeminiFieldExtractor] Empty input received - likely due to API error")
+            return (default_value, "No input data (API might have failed)", False)
+        
+        # Check if input is an error message
+        if json_input.startswith("Error:"):
+            print(f"[GeminiFieldExtractor] Received error message instead of JSON: {json_input}")
+            return (default_value, json_input, False)
+        
         data = self._parse_json_safely(json_input)
         if data is None:
             print(f"[GeminiFieldExtractor] Failed to parse JSON input")
+            # If it looks like a Gemini API error, provide more context
+            if "500 INTERNAL" in json_input or "Internal error" in json_input:
+                return (default_value, "API returned internal server error - model might not be available in your region", False)
             return (default_value, f"Error: {self.last_error}", False)
         
         try:
