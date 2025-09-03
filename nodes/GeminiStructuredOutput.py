@@ -4,6 +4,10 @@ import json
 import random
 import torch
 import traceback
+import numpy as np
+import base64
+import io
+from PIL import Image
 from google import genai
 from google.genai import types
 from typing import Optional, List, Dict, Any, Union
@@ -33,6 +37,7 @@ class GeminiStructuredOutput:
             },
             "optional": {
                 "system_instructions": ("STRING", {"multiline": True, "default": ""}),
+                "image": ("IMAGE",),
                 "enum_options": ("STRING", {
                     "multiline": True,
                     "default": '["option1", "option2", "option3"]',
@@ -220,9 +225,52 @@ class GeminiStructuredOutput:
                 self._log(f"Maximum retries ({max_retries}) reached with errors.")
                 return None
 
+    def tensor_to_pil(self, tensor):
+        """Convert ComfyUI tensor to PIL Image"""
+        if tensor is None:
+            return None
+        
+        try:
+            # Handle batch dimension - ComfyUI images are [B, H, W, C]
+            if len(tensor.shape) == 4:
+                tensor = tensor[0]  # Take first image from batch
+            
+            # ComfyUI tensors are in [H, W, C] format with values 0-1
+            # Convert to numpy and scale to 0-255
+            image_np = tensor.cpu().numpy()
+            
+            # Check if values are already in 0-255 range or 0-1 range
+            if image_np.max() <= 1.0:
+                # Values are in 0-1 range, scale to 0-255
+                image_np = (image_np * 255).astype(np.uint8)
+            else:
+                # Values are already in 0-255 range
+                image_np = image_np.astype(np.uint8)
+            
+            # Ensure correct shape [H, W, C]
+            if len(image_np.shape) == 2:
+                # Grayscale image, add channel dimension
+                image_np = np.stack([image_np] * 3, axis=-1)
+            
+            # Create PIL image
+            image = Image.fromarray(image_np, mode='RGB')
+            self._log(f"Image converted to PIL, size: {image.size}")
+            return image
+        except Exception as e:
+            self._log(f"Error converting image to PIL: {str(e)}")
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}")
+            return None
+    
+    def _pil_to_bytes(self, pil_image):
+        """Convert PIL Image to bytes for API"""
+        buffer = io.BytesIO()
+        pil_image.save(buffer, format='JPEG', quality=95)
+        return buffer.getvalue()
+
     def generate_structured(self, prompt, api_key, model, output_mode, schema_json, 
                            temperature, max_output_tokens, seed,
-                           system_instructions="", enum_options="", top_p=0.95, 
+                           system_instructions="", image=None, enum_options="", top_p=0.95, 
                            top_k=64, property_ordering="", stop_sequences="",
                            presence_penalty=0.0, frequency_penalty=0.0,
                            response_logprobs=False, logprobs=0, use_json_schema=False):
@@ -329,9 +377,36 @@ class GeminiStructuredOutput:
             self._log(f"Using schema: {json.dumps(response_schema, indent=2)[:500]}...")
             self._log(f"Sending structured prompt to Gemini API (model: {model}, mode: {output_mode})")
             
-            # Don't enhance prompt when using structured output with schema
-            # The schema itself is sufficient for the API
-            enhanced_prompt = prompt
+            # Prepare content with text and optional image
+            contents = []
+            
+            if image is not None:
+                pil_image = self.tensor_to_pil(image)
+                if pil_image:
+                    # Create content with both text and image
+                    contents = [
+                        types.Content(
+                            role="user",
+                            parts=[
+                                types.Part(text=prompt),
+                                types.Part(inline_data=types.Blob(
+                                    mime_type="image/jpeg",
+                                    data=self._pil_to_bytes(pil_image)
+                                ))
+                            ]
+                        )
+                    ]
+                    self._log("Image successfully added to prompt")
+                else:
+                    # Failed to convert image, use text only
+                    contents = [prompt]
+                    self._log("Failed to convert image, using text only")
+            else:
+                # No image provided, use text only
+                contents = [prompt]
+            
+            enhanced_prompt = contents[0] if isinstance(contents[0], str) else contents[0]
+            
             if output_mode == "enum" and not response_schema.get('enum'):
                 # Only add hint if enum is empty (shouldn't happen)
                 self._log("Warning: Empty enum options")
@@ -360,7 +435,7 @@ class GeminiStructuredOutput:
             response = self._call_gemini_api_structured(
                 client=client,
                 model=model,
-                contents=[enhanced_prompt],
+                contents=contents,
                 gen_config=gen_config,
                 max_retries=10
             )
@@ -373,7 +448,10 @@ class GeminiStructuredOutput:
                 schema_fields = response_schema.get("properties", {})
                 required_fields = response_schema.get("required", [])
                 
-                json_prompt = f"""Based on this input: {enhanced_prompt}
+                # Extract text from enhanced_prompt if it's a Content object
+                prompt_text = prompt if isinstance(enhanced_prompt, str) else prompt
+                
+                json_prompt = f"""Based on this input: {prompt_text}
 
 Generate a JSON object with this EXACT structure:
 {json.dumps(response_schema, indent=2)}
@@ -414,10 +492,32 @@ Example format:
                 try:
                     fallback_config = types.GenerateContentConfig(**fallback_config_dict)
                     
+                    # Create fallback contents with image if available
+                    fallback_contents = []
+                    if image is not None:
+                        pil_image = self.tensor_to_pil(image)
+                        if pil_image:
+                            fallback_contents = [
+                                types.Content(
+                                    role="user",
+                                    parts=[
+                                        types.Part(text=json_prompt),
+                                        types.Part(inline_data=types.Blob(
+                                            mime_type="image/jpeg",
+                                            data=self._pil_to_bytes(pil_image)
+                                        ))
+                                    ]
+                                )
+                            ]
+                        else:
+                            fallback_contents = [json_prompt]
+                    else:
+                        fallback_contents = [json_prompt]
+                    
                     self._log("Attempting fallback text generation...")
                     fallback_response = client.models.generate_content(
                         model=model,
-                        contents=[json_prompt],
+                        contents=fallback_contents,
                         config=fallback_config
                     )
                     

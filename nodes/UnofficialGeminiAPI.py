@@ -33,7 +33,11 @@ class UnofficialGeminiAPI:
             },
             "optional": {
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
-                "image": ("IMAGE",),
+                "image1": ("IMAGE",),
+                "image2": ("IMAGE",),
+                "image3": ("IMAGE",),
+                "image4": ("IMAGE",),
+                "image5": ("IMAGE",),
                 "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "frequency_penalty": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.1}),
                 "presence_penalty": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.1}),
@@ -140,8 +144,8 @@ class UnofficialGeminiAPI:
 
     def call_unofficial_api(self, prompt, api_key, model, temperature, max_tokens, base_url, seed,
                            system_prompt="You are a helpful assistant.", 
-                           image=None, top_p=0.95, 
-                           frequency_penalty=0.0, presence_penalty=0.0):
+                           image1=None, image2=None, image3=None, image4=None, image5=None,
+                           top_p=0.95, frequency_penalty=0.0, presence_penalty=0.0):
         
         self.log_messages = []
         self.api_request = {}
@@ -162,26 +166,30 @@ class UnofficialGeminiAPI:
                     "content": system_prompt
                 })
             
-            if image is not None:
-                image_base64 = self.tensor_to_base64(image)
-                if image_base64:
-                    self._log("Image successfully converted to base64")
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_base64}
-                            }
-                        ]
+            # Collect all non-None images
+            images = []
+            for i, img in enumerate([image1, image2, image3, image4, image5], 1):
+                if img is not None:
+                    image_base64 = self.tensor_to_base64(img)
+                    if image_base64:
+                        images.append(image_base64)
+                        self._log(f"Image {i} successfully converted to base64")
+                    else:
+                        self._log(f"Failed to convert image {i}")
+            
+            # Build user message with text and images
+            if images:
+                content = [{"type": "text", "text": prompt}]
+                for img_base64 in images:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": img_base64}
                     })
-                else:
-                    self._log("Failed to convert image, sending text only")
-                    messages.append({
-                        "role": "user",
-                        "content": prompt
-                    })
+                messages.append({
+                    "role": "user",
+                    "content": content
+                })
+                self._log(f"Sending {len(images)} image(s) with prompt")
             else:
                 messages.append({
                     "role": "user",
@@ -327,7 +335,11 @@ class UnofficialGeminiStreamAPI:
             },
             "optional": {
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
-                "image": ("IMAGE",),
+                "image1": ("IMAGE",),
+                "image2": ("IMAGE",),
+                "image3": ("IMAGE",),
+                "image4": ("IMAGE",),
+                "image5": ("IMAGE",),
                 "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
             }
         }
@@ -434,7 +446,8 @@ class UnofficialGeminiStreamAPI:
     def call_unofficial_stream_api(self, prompt, api_key, model, temperature, max_tokens, 
                                   base_url, stream, seed,
                                   system_prompt="You are a helpful assistant.", 
-                                  image=None, top_p=0.95):
+                                  image1=None, image2=None, image3=None, image4=None, image5=None,
+                                  top_p=0.95):
         
         self.log_messages = []
         self.api_request = {}
@@ -456,26 +469,30 @@ class UnofficialGeminiStreamAPI:
                     "content": system_prompt
                 })
             
-            if image is not None:
-                image_base64 = self.tensor_to_base64(image)
-                if image_base64:
-                    self._log("Image successfully converted to base64")
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_base64}
-                            }
-                        ]
+            # Collect all non-None images
+            images = []
+            for i, img in enumerate([image1, image2, image3, image4, image5], 1):
+                if img is not None:
+                    image_base64 = self.tensor_to_base64(img)
+                    if image_base64:
+                        images.append(image_base64)
+                        self._log(f"Image {i} successfully converted to base64")
+                    else:
+                        self._log(f"Failed to convert image {i}")
+            
+            # Build user message with text and images
+            if images:
+                content = [{"type": "text", "text": prompt}]
+                for img_base64 in images:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": img_base64}
                     })
-                else:
-                    self._log("Failed to convert image, sending text only")
-                    messages.append({
-                        "role": "user",
-                        "content": prompt
-                    })
+                messages.append({
+                    "role": "user",
+                    "content": content
+                })
+                self._log(f"Sending {len(images)} image(s) with prompt")
             else:
                 messages.append({
                     "role": "user",
