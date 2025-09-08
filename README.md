@@ -22,8 +22,10 @@ A comprehensive collection of custom nodes for integrating Google Gemini API wit
 - **Gemini Video Captioner** - Generate intelligent captions for videos
 
 ### Unofficial API Support
-- **Unofficial API Call** - Call unofficial APIs supporting Claude, GPT, and other models
+- **Unofficial API Call** - Call unofficial APIs supporting Claude, GPT, Gemini and other models
 - **Unofficial Stream API Call** - Stream responses from unofficial APIs with real-time output
+  - **NEW**: Support for both OpenAI Compatible and Gemini Native API formats
+  - **NEW**: Automatic image extraction from Gemini Native API responses
 
 ## 📋 Table of Contents
 - [Features](#features)
@@ -911,6 +913,98 @@ Output: Detailed sports commentary
 - Use higher temperature for creative interpretations
 - For long videos, consider splitting into segments
 - Test with different prompts for specific analysis needs
+
+### 🌐 Unofficial API Call
+Call unofficial/third-party APIs supporting Claude, GPT, Gemini and other models with automatic image generation support.
+
+**Input Parameters:**
+- `prompt` (STRING): The input text prompt
+- `api_key` (STRING): Your API key for the service
+- `api_format` (ENUM): API format selection
+  - **"OpenAI Compatible"**: For Claude, GPT, and OpenAI-compatible APIs
+  - **"Gemini Native"**: For Gemini native API format (supports image generation)
+- `model` (STRING): Model name
+  - Examples: claude-3-5-sonnet, gpt-4o, gemini-2.5-flash-image-preview
+- `temperature` (FLOAT, 0.0-1.0, default: 0.7): Generation temperature
+- `max_tokens` (INT, 64-8192, default: 1024): Maximum response length
+- `base_url` (STRING): API base URL
+  - OpenAI format example: https://api.example.com/v1
+  - Gemini format example: https://ai.example.com
+- `seed` (INT): Random seed for reproducibility
+- `system_prompt` (STRING, optional): System instructions
+- `image1-5` (IMAGE, optional): Up to 5 input images for multimodal requests
+- `top_p` (FLOAT, 0.0-1.0, default: 0.95): Nucleus sampling
+- `frequency_penalty` (FLOAT, -2.0-2.0, default: 0.0): Frequency penalty
+- `presence_penalty` (FLOAT, -2.0-2.0, default: 0.0): Presence penalty
+
+**Features:**
+- **Dual API Format Support**: Switch between OpenAI and Gemini native formats
+- **Automatic Image Extraction**: Extracts images from Gemini native API responses
+- **Multi-Image Input**: Support for up to 5 reference images
+- **Flexible Model Support**: Works with various third-party API providers
+- **Complete API Debugging**: Full request/response logging
+
+**Output:**
+- `response` (STRING): Generated text response
+- `image` (IMAGE): Generated/extracted image (if available)
+- `api_request` (STRING): Complete API request (JSON)
+- `api_response` (STRING): Complete API response (JSON)
+
+**Usage Examples:**
+
+1. **Claude API (OpenAI Compatible):**
+```
+API Format: OpenAI Compatible
+Model: claude-3-5-sonnet-20241022
+Base URL: https://api.anthropic.com/v1
+Prompt: "Explain quantum computing"
+```
+
+2. **Gemini Image Generation (Native):**
+```
+API Format: Gemini Native
+Model: gemini-2.5-flash-image-preview
+Base URL: https://ai.juguang.chat
+Prompt: "Generate a cyberpunk city at night"
+Output: Text description + Generated image
+```
+
+3. **GPT with Images (OpenAI Compatible):**
+```
+API Format: OpenAI Compatible
+Model: gpt-4-vision-preview
+Base URL: https://api.openai.com/v1
+Prompt: "What's in this image?"
+Image1: [Upload image]
+```
+
+### 🌊 Unofficial Stream API Call
+Stream responses from unofficial APIs with real-time output and support for both OpenAI and Gemini formats.
+
+**Input Parameters:**
+- Same as Unofficial API Call, plus:
+- `stream` (BOOLEAN, default: true): Enable streaming mode
+
+**Additional Features:**
+- **Real-time Streaming**: See responses as they're generated
+- **Stream Log Output**: Track streaming progress
+- **Chunk Processing**: Handle partial responses efficiently
+- **Image Streaming Support**: Extract images from streaming Gemini responses
+
+**Output:**
+- `response` (STRING): Complete streamed response
+- `image` (IMAGE): Generated/extracted image (if available)
+- `stream_log` (STRING): Streaming progress log
+- `api_request` (STRING): Complete API request (JSON)
+- `api_response` (STRING): Complete streaming metadata
+
+**Best Practices:**
+- Use Gemini Native format for image generation tasks
+- Use OpenAI Compatible format for Claude, GPT, and similar APIs
+- Enable streaming for long responses to see progress
+- Set appropriate max_tokens based on expected response length
+- Use system prompts to guide model behavior
+- Test with different temperature values for optimal results
 
 ## Usage Examples
 
